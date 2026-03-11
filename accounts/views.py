@@ -174,22 +174,37 @@ from rest_framework.views import APIView
 class FamilyManagementView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
-    # 1. FARZANDLAR RO'YXATINI KO'RISH (GET)
+    # 1. FARZANDLAR RO'YXATI (GET) - Telefon raqami bo'yicha qidirish imkoniyati bilan
+    @swagger_auto_schema(
+        tags=['family'],
+        operation_summary="Ota-onaga biriktirilgan farzandlar ro'yxati",
+        manual_parameters=[
+            openapi.Parameter('child_phone', openapi.IN_QUERY, type=openapi.TYPE_STRING, description="Muayyan farzandni raqami orqali qidirish (ixtiyoriy)")
+        ]
+    )
     def get(self, request):
         if request.user.role != 'parent':
             return Response({"error": "Faqat ota-onalar ko'ra oladi"}, status=403)
         
-        # Ota-onaga bog'langan barcha farzandlarni olish
-        children = User.objects.filter(parent_relation__parent=request.user)
-        serializer = ChildSerializer(children, many=True)
+        child_phone = request.query_params.get('child_phone')
+        queryset = User.objects.filter(parent_relation__parent=request.user)
+        
+        if child_phone:
+            queryset = queryset.filter(phone=child_phone)
+            
+        serializer = ChildSerializer(queryset, many=True)
         return Response(serializer.data)
 
-    # 2. YANGI FARZAND QO'SHISH (POST)
-    @swagger_auto_schema(request_body=openapi.Schema(
-        type=openapi.TYPE_OBJECT,
-        required=['child_phone'],
-        properties={'child_phone': openapi.Schema(type=openapi.TYPE_STRING)}
-    ))
+    # 2. QO'SHISH (POST) - Bu allaqachon telefon raqami orqali edi
+    @swagger_auto_schema(
+        tags=['family'],
+        operation_summary="Farzandni telefon raqami orqali qo'shish",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=['child_phone'],
+            properties={'child_phone': openapi.Schema(type=openapi.TYPE_STRING, example="+998901234567")}
+        )
+    )
     def post(self, request):
         if request.user.role != 'parent':
             return Response({"error": "Faqat ota-onalar farzand qo'sha oladi"}, status=403)
@@ -206,19 +221,30 @@ class FamilyManagementView(APIView):
             
         return Response({"message": f"{child.full_name} muvaffaqiyatli qo'shildi"}, status=201)
 
-    # 3. FARZANDNI RO'YXATDAN CHIQARISH (DELETE)
-    @swagger_auto_schema(manual_parameters=[
-        openapi.Parameter('child_id', openapi.IN_QUERY, type=openapi.TYPE_INTEGER, required=True)
-    ])
+    # 3. O'CHIRISH (DELETE) - Endi ID emas, telefon raqami orqali
+    @swagger_auto_schema(
+        tags=['family'],
+        operation_summary="Farzandni telefon raqami orqali ota-onadan uzish",
+        manual_parameters=[
+            openapi.Parameter('child_phone', openapi.IN_QUERY, type=openapi.TYPE_STRING, required=True, description="O'chiriladigan farzandning telefon raqami")
+        ]
+    )
     def delete(self, request):
         if request.user.role != 'parent':
             return Response({"error": "Faqat ota-onalar o'chira oladi"}, status=403)
             
-        child_id = request.query_params.get('child_id')
-        relation = FamilyRelation.objects.filter(parent=request.user, child_id=child_id).first()
+        child_phone = request.query_params.get('child_phone')
+        if not child_phone:
+            return Response({"error": "Telefon raqami yuborilmadi"}, status=400)
+
+        # FamilyRelation'dan telefon raqami orqali topib o'chirish
+        relation = FamilyRelation.objects.filter(
+            parent=request.user, 
+            child__phone=child_phone
+        ).first()
         
         if relation:
             relation.delete()
             return Response({"message": "Farzand muvaffaqiyatli olib tashlandi"}, status=200)
         
-        return Response({"error": "Bunday biriktirilgan farzand topilmadi"}, status=404)
+        return Response({"error": "Bunday raqamli biriktirilgan farzand topilmadi"}, status=404)
