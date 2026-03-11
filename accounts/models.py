@@ -59,13 +59,12 @@ class User(AbstractUser):
         return f"{self.full_name} ({self.get_role_display()})"
     
 class FamilyRelation(models.Model):
-    parent = models.ForeignKey(User, on_delete=models.CASCADE, related_name='children_relations', limit_choices_to={'role': 'parent'}, verbose_name="Ota-ona")
-    child = models.OneToOneField(User, on_delete=models.CASCADE, related_name='parent_relation', limit_choices_to={'role': 'child'}, verbose_name="Farzand")
-    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Yaratilgan vaqt")
+    parent = models.ForeignKey(User, on_delete=models.CASCADE, related_name='children_relations')
+    child = models.ForeignKey(User, on_delete=models.CASCADE, related_name='parent_relation')
+    child_label = models.CharField(max_length=100, help_text="Masalan: O'g'lim Ali") # Ism qo'shish uchun
+    created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        verbose_name = "Oila aloqasi"
-        verbose_name_plural = "Oila aloqalari"
         unique_together = ('parent', 'child')
 
     def __str__(self):

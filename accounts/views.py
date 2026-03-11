@@ -222,29 +222,42 @@ class FamilyManagementView(APIView):
         return Response({"message": f"{child.full_name} muvaffaqiyatli qo'shildi"}, status=201)
 
     # 3. O'CHIRISH (DELETE) - Endi ID emas, telefon raqami orqali
+# 2. YANGI FARZAND QO'SHISH (POST)
     @swagger_auto_schema(
         tags=['family'],
-        operation_summary="Farzandni telefon raqami orqali ota-onadan uzish",
-        manual_parameters=[
-            openapi.Parameter('child_phone', openapi.IN_QUERY, type=openapi.TYPE_STRING, required=True, description="O'chiriladigan farzandning telefon raqami")
-        ]
+        operation_summary="Farzandni ism va telefon raqami orqali qo'shish",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=['child_phone', 'child_label'],
+            properties={
+                'child_phone': openapi.Schema(type=openapi.TYPE_STRING, example="+998995577784"),
+                'child_label': openapi.Schema(type=openapi.TYPE_STRING, example="O'g'lim Bekzod") # Ism bu yerda keladi
+            }
+        )
     )
-    def delete(self, request):
+    def post(self, request):
         if request.user.role != 'parent':
-            return Response({"error": "Faqat ota-onalar o'chira oladi"}, status=403)
-            
-        child_phone = request.query_params.get('child_phone')
-        if not child_phone:
-            return Response({"error": "Telefon raqami yuborilmadi"}, status=400)
+            return Response({"error": "Faqat ota-onalar farzand qo'sha oladi"}, status=403)
+        
+        child_phone = request.data.get('child_phone')
+        child_label = request.data.get('child_label') # Ota-ona bergan nom
+        
+        if not child_label:
+            return Response({"error": "Farzandga nom (label) bering"}, status=400)
 
-        # FamilyRelation'dan telefon raqami orqali topib o'chirish
-        relation = FamilyRelation.objects.filter(
+        child = User.objects.filter(phone=child_phone, role='child').first()
+        
+        if not child:
+            return Response({"error": "Bunday raqamli farzand topilmadi"}, status=404)
+        
+        # get_or_create o'rniga update_or_create ishlatsak, ism o'zgarsa yangilab ketadi
+        relation, created = FamilyRelation.objects.update_or_create(
             parent=request.user, 
-            child__phone=child_phone
-        ).first()
+            child=child,
+            defaults={'child_label': child_label}
+        )
         
-        if relation:
-            relation.delete()
-            return Response({"message": "Farzand muvaffaqiyatli olib tashlandi"}, status=200)
+        status_code = 201 if created else 200
+        msg = "muvaffaqiyatli qo'shildi" if created else "ma'lumotlari yangilandi"
         
-        return Response({"error": "Bunday raqamli biriktirilgan farzand topilmadi"}, status=404)
+        return Response({"message": f"{child.full_name} ({child_label}) {msg}"}, status=status_code)

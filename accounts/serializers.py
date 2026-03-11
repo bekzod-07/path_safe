@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import User, UserLocation, AppUsage
+from .models import User, UserLocation, AppUsage, FamilyRelation
 
 # --- FOYDALANUVCHI SERIALIZER ---
 class UserSerializer(serializers.ModelSerializer):
@@ -73,6 +73,16 @@ class AppUsageSerializer(serializers.ModelSerializer):
         return AppUsage.objects.create(user=user, **validated_data)
     
 class ChildSerializer(serializers.ModelSerializer):
+    label = serializers.SerializerMethodField()
+
     class Meta:
         model = User
-        fields = ['id', 'full_name', 'phone', 'is_verified']
+        fields = ['id', 'full_name', 'phone', 'is_verified', 'label']
+
+    def get_label(self, obj):
+        # Hozirgi login qilgan ota-ona bergan nomni olamiz
+        request = self.context.get('request')
+        if request and request.user.is_authenticated:
+            relation = FamilyRelation.objects.filter(parent=request.user, child=obj).first()
+            return relation.child_label if relation else ""
+        return ""
