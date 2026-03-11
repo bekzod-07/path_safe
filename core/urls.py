@@ -9,13 +9,14 @@ from rest_framework import permissions
 from drf_yasg.views import get_schema_view
 from drf_yasg import openapi
 
-# Viewlarni import qilish
+# Viewlarni import qilish - FamilyManagementView qo'shildi
 from accounts.views import (
     RegisterView, 
     LoginView, 
     VerifyOTPView, 
     LocationAPIView,
-    AppUsageAPIView
+    AppUsageAPIView,
+    FamilyManagementView  # <-- SHU QO'SHILDI
 )
 
 schema_view = get_schema_view(
@@ -24,8 +25,8 @@ schema_view = get_schema_view(
       default_version='v1',
       description="Farzand xavfsizligi loyihasi uchun barcha API hujjatlari",
    ),
-   public=False,
-   permission_classes=(permissions.IsAuthenticated,),
+   public=True, # <-- True qilsangiz qulayroq bo'ladi
+   permission_classes=(permissions.AllowAny,), # <-- Swagger hamma uchun ochiq bo'lishi kerak
 )
 
 urlpatterns = [
@@ -40,6 +41,7 @@ urlpatterns = [
     # Services API
     path('location/', LocationAPIView.as_view(), name='location'),
     path('app-usage/', AppUsageAPIView.as_view(), name='app_usage'),
+    path('family/', FamilyManagementView.as_view(), name='family_management'), # <-- SHU PATH QO'SHILDI
     
     # Swagger
     path('swagger/', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
