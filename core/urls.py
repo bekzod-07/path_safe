@@ -1,16 +1,18 @@
 from django.contrib import admin
 from django.urls import path
+from django.contrib.auth.decorators import login_required
+from django.views.generic import RedirectView
 from rest_framework import permissions
 from drf_yasg.views import get_schema_view
 from drf_yasg import openapi
 
-# Viewlarni import qilish (HAMMASINI - AppUsage qo'shildi)
+# Viewlarni import qilish
 from accounts.views import (
     RegisterView, 
     LoginView, 
     VerifyOTPView, 
     LocationAPIView,
-    AppUsageAPIView  # <--- Shuni qo'shish esdan chiqqan
+    AppUsageAPIView
 )
 
 schema_view = get_schema_view(
@@ -19,11 +21,14 @@ schema_view = get_schema_view(
       default_version='v1',
       description="Farzand xavfsizligi loyihasi uchun barcha API hujjatlari",
    ),
-   public=True,
-   permission_classes=(permissions.AllowAny,),
+   public=False, # Hujjatlarni ommadan yashiramiz
+   permission_classes=(permissions.IsAuthenticated,), # Swaggerga kirish uchun login shart
 )
 
 urlpatterns = [
+    # Asosiy sahifaga (/) kirganda avval login so'raydi, keyin Swaggerga yuboradi
+    path('', login_required(RedirectView.as_view(url='/swagger/'))),
+
     path('admin/', admin.site.urls),
     
     # Auth API qismi
@@ -37,6 +42,6 @@ urlpatterns = [
     # App Usage (Ilova nazorati) API qismi
     path('app-usage/', AppUsageAPIView.as_view(), name='app_usage'),
     
-    # Swagger (Hujjatlashtirish)
+    # Swagger (Faqat login qilganlar uchun)
     path('swagger/', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
 ]
