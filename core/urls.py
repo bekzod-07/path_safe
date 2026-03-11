@@ -1,5 +1,7 @@
 from django.contrib import admin
-from django.urls import path
+from django.urls import path, re_path # re_path qo'shildi
+from django.conf import settings # settings qo'shildi
+from django.views.static import serve # serve qo'shildi
 from django.contrib.auth.decorators import login_required
 from django.views.generic import RedirectView
 from rest_framework import permissions
@@ -21,8 +23,8 @@ schema_view = get_schema_view(
       default_version='v1',
       description="Farzand xavfsizligi loyihasi uchun barcha API hujjatlari",
    ),
-   public=False, # Hujjatlarni ommadan yashiramiz
-   permission_classes=(permissions.IsAuthenticated,), # Swaggerga kirish uchun login shart
+   public=False,
+   permission_classes=(permissions.IsAuthenticated,),
 )
 
 urlpatterns = [
@@ -44,4 +46,10 @@ urlpatterns = [
     
     # Swagger (Faqat login qilganlar uchun)
     path('swagger/', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
+]
+
+# DEBUG=False bo'lganda statik va media fayllarni ko'rsatish uchun majburiy kod:
+urlpatterns += [
+    re_path(r'^static/(?P<path>.*)$', serve, {'document_root': settings.STATIC_ROOT}),
+    re_path(r'^media/(?P<path>.*)$', serve, {'document_root': settings.MEDIA_ROOT}),
 ]
