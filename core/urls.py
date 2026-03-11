@@ -1,7 +1,8 @@
 from django.contrib import admin
-from django.urls import path, re_path # re_path qo'shildi
-from django.conf import settings # settings qo'shildi
-from django.views.static import serve # serve qo'shildi
+from django.urls import path, re_path
+from django.conf import settings
+from django.conf.urls.static import static
+from django.views.static import serve
 from django.contrib.auth.decorators import login_required
 from django.views.generic import RedirectView
 from rest_framework import permissions
@@ -28,27 +29,23 @@ schema_view = get_schema_view(
 )
 
 urlpatterns = [
-    # Asosiy sahifaga (/) kirganda avval login so'raydi, keyin Swaggerga yuboradi
     path('', login_required(RedirectView.as_view(url='/swagger/'))),
-
     path('admin/', admin.site.urls),
     
-    # Auth API qismi
+    # Auth API
     path('register/', RegisterView.as_view(), name='register'),
     path('verify/', VerifyOTPView.as_view(), name='verify'),
     path('login/', LoginView.as_view(), name='login'),
     
-    # Location (Geolokatsiya) API qismi
+    # Services API
     path('location/', LocationAPIView.as_view(), name='location'),
-
-    # App Usage (Ilova nazorati) API qismi
     path('app-usage/', AppUsageAPIView.as_view(), name='app_usage'),
     
-    # Swagger (Faqat login qilganlar uchun)
+    # Swagger
     path('swagger/', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
 ]
 
-# DEBUG=False bo'lganda statik va media fayllarni ko'rsatish uchun majburiy kod:
+# DEBUG=False bo'lganda statik va media fayllarni ko'rsatish
 urlpatterns += [
     re_path(r'^static/(?P<path>.*)$', serve, {'document_root': settings.STATIC_ROOT}),
     re_path(r'^media/(?P<path>.*)$', serve, {'document_root': settings.MEDIA_ROOT}),

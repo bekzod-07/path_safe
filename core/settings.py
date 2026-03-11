@@ -15,13 +15,16 @@ ALLOWED_HOSTS = ['api.kyotosushi.uz', 'www.api.kyotosushi.uz', '127.0.0.1', 'loc
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 if not DEBUG:
-    SECURE_SSL_REDIRECT = True
+    # SSL sertifikati muammoli bo'lsa, buni vaqtincha False qilib turing
+    SECURE_SSL_REDIRECT = True 
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
+    
     # HSTS sozlamalari
     SECURE_HSTS_SECONDS = 31536000
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_HSTS_PRELOAD = True
+    
     # Xavfsizlik sarlavhalari
     SECURE_CONTENT_TYPE_NOSNIFF = True
     SECURE_BROWSER_XSS_FILTER = True
@@ -30,7 +33,7 @@ else:
     SESSION_COOKIE_SECURE = False
     CSRF_COOKIE_SECURE = False
 
-# Ishonchli manbalar
+# Ishonchli manbalar (CSRF xatolarini oldini olish uchun)
 CSRF_TRUSTED_ORIGINS = [
     'https://api.kyotosushi.uz',
     'https://www.api.kyotosushi.uz'
@@ -42,7 +45,7 @@ INSTALLED_APPS = [
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
-    'django.contrib.staticfiles', # Statik fayllar uchun
+    'django.contrib.staticfiles',
     
     'rest_framework',
     'rest_framework.authtoken',
@@ -111,11 +114,6 @@ USE_TZ = True
 # --- STATIK FAYLLAR SOZLAMASI ---
 STATIC_URL = '/static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'static')
-
-# Agar serverda 'static' papkasi ichida dizayn fayllari bo'lsa:
-STATICFILES_DIRS = [
-    # os.path.join(BASE_DIR, 'assets'), # Agar qo'shimcha papkangiz bo'lsa oching
-]
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
