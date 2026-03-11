@@ -15,7 +15,8 @@ from .serializers import (
     LoginSerializer, 
     VerifyOTPSerializer, 
     LocationSerializer,
-    AppUsageSerializer
+    AppUsageSerializer,
+    ChildSerializer
 )
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
@@ -165,3 +166,59 @@ class AppUsageAPIView(generics.ListCreateAPIView):
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
+
+from rest_framework.generics import ListAPIView
+from rest_framework.views import APIView
+
+# --- FARZANDLARNI BOSHQARISH (GET, POST, DELETE) ---
+class FamilyManagementView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    # 1. FARZANDLAR RO'YXATINI KO'RISH (GET)
+    def get(self, request):
+        if request.user.role != 'parent':
+            return Response({"error": "Faqat ota-onalar ko'ra oladi"}, status=403)
+        
+        # Ota-onaga bog'langan barcha farzandlarni olish
+        children = User.objects.filter(parent_relation__parent=request.user)
+        serializer = ChildSerializer(children, many=True)
+        return Response(serializer.data)
+
+    # 2. YANGI FARZAND QO'SHISH (POST)
+    @swagger_auto_schema(request_body=openapi.Schema(
+        type=openapi.TYPE_OBJECT,
+        required=['child_phone'],
+        properties={'child_phone': openapi.Schema(type=openapi.TYPE_STRING)}
+    ))
+    def post(self, request):
+        if request.user.role != 'parent':
+            return Response({"error": "Faqat ota-onalar farzand qo'sha oladi"}, status=403)
+        
+        child_phone = request.data.get('child_phone')
+        child = User.objects.filter(phone=child_phone, role='child').first()
+        
+        if not child:
+            return Response({"error": "Bunday raqamli farzand topilmadi"}, status=404)
+        
+        relation, created = FamilyRelation.objects.get_or_create(parent=request.user, child=child)
+        if not created:
+            return Response({"message": "Bu farzand allaqachon biriktirilgan"}, status=400)
+            
+        return Response({"message": f"{child.full_name} muvaffaqiyatli qo'shildi"}, status=201)
+
+    # 3. FARZANDNI RO'YXATDAN CHIQARISH (DELETE)
+    @swagger_auto_schema(manual_parameters=[
+        openapi.Parameter('child_id', openapi.IN_QUERY, type=openapi.TYPE_INTEGER, required=True)
+    ])
+    def delete(self, request):
+        if request.user.role != 'parent':
+            return Response({"error": "Faqat ota-onalar o'chira oladi"}, status=403)
+            
+        child_id = request.query_params.get('child_id')
+        relation = FamilyRelation.objects.filter(parent=request.user, child_id=child_id).first()
+        
+        if relation:
+            relation.delete()
+            return Response({"message": "Farzand muvaffaqiyatli olib tashlandi"}, status=200)
+        
+        return Response({"error": "Bunday biriktirilgan farzand topilmadi"}, status=404)

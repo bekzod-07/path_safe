@@ -71,3 +71,8 @@ class AppUsageSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"phone": "Bunday foydalanuvchi mavjud emas"})
 
         return AppUsage.objects.create(user=user, **validated_data)
+    
+class ChildSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ['id', 'full_name', 'phone', 'is_verified']

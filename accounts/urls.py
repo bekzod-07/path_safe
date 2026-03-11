@@ -6,20 +6,22 @@ from .views import (
     VerifyOTPView, 
     LoginView, 
     LocationAPIView, 
-    AppUsageAPIView
+    AppUsageAPIView,
+    FamilyManagementView
 )
 
 urlpatterns = [
-    # Bosh sahifaga kirganda (api.kyotosushi.uz/) avval login so'raydi, 
-    # keyin Swaggerga yuboradi. Agar login qilmagan bo'lsa, /login/ sahifasiga o'tadi.
+    # Bosh sahifa - Swaggerga yo'naltirish
+    # Eslatma: login_required ishlashi uchun settings.py da LOGIN_URL sozlangan bo'lishi kerak
     path('', login_required(RedirectView.as_view(url='/swagger/'))),
 
-    # Ro'yxatdan o'tish va Tasdiqlash (Bular IsAuthenticated'dan mustasno bo'lishi kerak)
+    # Ochiq endpointlar (Public)
     path('register/', RegisterView.as_view(), name='register'),
     path('verify/', VerifyOTPView.as_view(), name='verify'),
     path('login/', LoginView.as_view(), name='login'),
 
-    # Xavfsiz endpointlar (Faqat login qilganlar uchun)
+    # Yopiq endpointlar (Private - Token talab qilinadi)
     path('location/', LocationAPIView.as_view(), name='location'),
     path('app-usage/', AppUsageAPIView.as_view(), name='app_usage'),
+    path('family/', FamilyManagementView.as_view(), name='family_management'),
 ]
