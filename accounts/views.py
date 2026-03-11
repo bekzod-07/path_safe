@@ -190,16 +190,24 @@ class FamilyManagementView(APIView):
             openapi.Parameter('child_phone', openapi.IN_QUERY, type=openapi.TYPE_STRING, description="Muayyan farzandni raqami orqali qidirish (ixtiyoriy)")
         ]
     )
+    
     def get(self, request):
-        # Faqat ota-ona o'ziga bog'langanlarni ko'radi
-        child_phone = request.query_params.get('child_phone')
-        queryset = User.objects.filter(parent_relation__parent=request.user)
-        
-        if child_phone:
-            queryset = queryset.filter(phone=child_phone)
+            # Agar parent_phone query-da kelsa, o'sha ota-onaning farzandlarini olamiz
+            p_phone = request.query_params.get('parent_phone')
+            child_phone = request.query_params.get('child_phone')
+
+            if p_phone:
+                # Telefon raqami orqali ota-onani topamiz
+                queryset = User.objects.filter(parent_relation__parent__phone=p_phone)
+            else:
+                # Agar telefon berilmasa, login qilgan foydalanuvchinikini olamiz
+                queryset = User.objects.filter(parent_relation__parent=request.user)
             
-        serializer = ChildSerializer(queryset, many=True, context={'request': request})
-        return Response(serializer.data)
+            if child_phone:
+                queryset = queryset.filter(phone=child_phone)
+                
+            serializer = ChildSerializer(queryset, many=True, context={'request': request})
+            return Response(serializer.data)
 
     # 2. BIRIKTIRISH (POST)
     @swagger_auto_schema(
