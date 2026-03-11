@@ -1,12 +1,11 @@
 from rest_framework import serializers
-from django.utils import timezone
 from .models import User, UserLocation, AppUsage
 
 # --- FOYDALANUVCHI SERIALIZER ---
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ['id', 'full_name', 'phone', 'is_verified']
+        fields = ['id', 'full_name', 'phone', 'role', 'is_verified']
 
 # --- RO'YXATDAN O'TISH ---
 class RegisterSerializer(serializers.ModelSerializer):
@@ -14,14 +13,16 @@ class RegisterSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ['full_name', 'phone', 'password']
+        fields = ['full_name', 'phone', 'password', 'role'] # 'role' qo'shildi
 
     def create(self, validated_data):
+        # validated_data ichida 'role' ham keladi
         user = User.objects.create_user(
             phone=validated_data['phone'],
             full_name=validated_data['full_name'],
             password=validated_data['password'],
-            is_active=True # Hozircha True, xohlasangiz False qilib OTPdan keyin yoqasiz
+            role=validated_data.get('role', 'parent'), # Rolni saqlash
+            is_active=True 
         )
         return user
 
@@ -36,18 +37,16 @@ class LoginSerializer(serializers.Serializer):
 
 # --- GEOLOKATSIYA (LOCATION) ---
 class LocationSerializer(serializers.ModelSerializer):
-    # GET so'rovda telefon raqamni ko'rish uchun
     phone = serializers.CharField(source='user.phone', read_only=True)
-    # Ma'lumot qachon kelganini chiroyli formatda ko'rish uchun
+    user_role = serializers.CharField(source='user.role', read_only=True) # Rolni ko'rish foydali
     created_at = serializers.DateTimeField(format="%Y-%m-%d %H:%M:%S", read_only=True)
 
     class Meta:
         model = UserLocation
-        fields = ['id', 'phone', 'lat', 'lng', 'address', 'created_at']
+        fields = ['id', 'phone', 'user_role', 'lat', 'lng', 'address', 'created_at']
 
 # --- ILOVA NAZORATI (APP USAGE) ---
 class AppUsageSerializer(serializers.ModelSerializer):
-    # Ma'lumot yuborilayotganda telefon raqam orqali userni topish uchun
     phone = serializers.CharField(write_only=True, required=False)
     user_phone = serializers.CharField(source='user.phone', read_only=True)
     created_at = serializers.DateTimeField(format="%Y-%m-%d %H:%M:%S", read_only=True)
@@ -57,10 +56,10 @@ class AppUsageSerializer(serializers.ModelSerializer):
         fields = ['id', 'phone', 'user_phone', 'app_name', 'usage_time', 'created_at']
 
     def create(self, validated_data):
-        # Agar viewdan user kelmasa, yuborilgan phone orqali topamiz
         phone = validated_data.pop('phone', None)
         request = self.context.get('request')
 
+        # Avval requestdagi foydalanuvchini tekshiramiz
         if request and request.user.is_authenticated:
             user = request.user
         elif phone:
