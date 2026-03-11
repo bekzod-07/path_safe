@@ -86,3 +86,6 @@ class ChildSerializer(serializers.ModelSerializer):
             relation = FamilyRelation.objects.filter(parent=request.user, child=obj).first()
             return relation.child_label if relation else ""
         return ""
+    
+
+    
