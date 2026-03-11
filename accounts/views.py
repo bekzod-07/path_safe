@@ -187,27 +187,30 @@ class FamilyManagementView(APIView):
         tags=['family'],
         operation_summary="Ota-onaga biriktirilgan farzandlar ro'yxati",
         manual_parameters=[
+            openapi.Parameter('parent_phone', openapi.IN_QUERY, type=openapi.TYPE_STRING, description="Ota-ona telefon raqami (ixtiyoriy)"),
             openapi.Parameter('child_phone', openapi.IN_QUERY, type=openapi.TYPE_STRING, description="Muayyan farzandni raqami orqali qidirish (ixtiyoriy)")
         ]
     )
-    
     def get(self, request):
-            # Agar parent_phone query-da kelsa, o'sha ota-onaning farzandlarini olamiz
-            p_phone = request.query_params.get('parent_phone')
-            child_phone = request.query_params.get('child_phone')
+        p_phone = request.query_params.get('parent_phone')
+        child_phone = request.query_params.get('child_phone')
 
-            if p_phone:
-                # Telefon raqami orqali ota-onani topamiz
-                queryset = User.objects.filter(parent_relation__parent__phone=p_phone)
-            else:
-                # Agar telefon berilmasa, login qilgan foydalanuvchinikini olamiz
-                queryset = User.objects.filter(parent_relation__parent=request.user)
-            
-            if child_phone:
-                queryset = queryset.filter(phone=child_phone)
-                
-            serializer = ChildSerializer(queryset, many=True, context={'request': request})
-            return Response(serializer.data)
+        # Ota-ona raqami orqali yoki login qilgan user orqali FamilyRelation modelidan qidiramiz
+        if p_phone:
+            relations = FamilyRelation.objects.filter(parent__phone=p_phone)
+        else:
+            relations = FamilyRelation.objects.filter(parent=request.user)
+
+        if child_phone:
+            relations = relations.filter(child__phone=child_phone)
+
+        # FamilyRelation'dan 'child' (User) obyektlarini ajratib olamiz
+        children = [rel.child for rel in relations]
+        
+        # Olingan bolalar ro'yxatiga o'sha ota-ona bergan 'child_label'ni ham qo'shib yuborish uchun:
+        # Serializer'ga context orqali ota-onani berib yuboramiz
+        serializer = ChildSerializer(children, many=True, context={'request': request})
+        return Response(serializer.data)
 
     # 2. BIRIKTIRISH (POST)
     @swagger_auto_schema(
@@ -239,6 +242,7 @@ class FamilyManagementView(APIView):
         if not child:
             return Response({"error": "Bunday raqamli farzand topilmadi!"}, status=status.HTTP_404_NOT_FOUND)
 
+        # update_or_create: agar bog'lanish bo'lsa ismini yangilaydi, yo'q bo'lsa yaratadi
         relation, created = FamilyRelation.objects.update_or_create(
             parent=parent,
             child=child,
@@ -267,6 +271,7 @@ class FamilyManagementView(APIView):
         if not p_phone or not c_phone:
             return Response({"error": "Ota-ona va farzand raqami yuborilishi shart!"}, status=status.HTTP_400_BAD_REQUEST)
 
+        # Ota-ona va farzand raqami bo'yicha FamilyRelation'ni topib o'chiramiz
         relation = FamilyRelation.objects.filter(
             parent__phone=p_phone, 
             child__phone=c_phone

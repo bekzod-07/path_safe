@@ -59,9 +59,21 @@ class User(AbstractUser):
         return f"{self.full_name} ({self.get_role_display()})"
     
 class FamilyRelation(models.Model):
-    parent = models.ForeignKey(User, on_delete=models.CASCADE, related_name='children_relations')
-    child = models.ForeignKey(User, on_delete=models.CASCADE, related_name='parent_relation')
-    child_label = models.CharField(max_length=100, help_text="Masalan: O'g'lim Ali") # Ism qo'shish uchun
+    # Ota-ona uchun related_name ni 'parent_relation' qilish qulayroq
+    parent = models.ForeignKey(
+        User, 
+        on_view=models.CASCADE, 
+        related_name='parent_relations' # Ota-ona orqali ulanish
+    )
+    child = models.ForeignKey(
+        User, 
+        on_delete=models.CASCADE, 
+        related_name='child_relations' # Farzand orqali ulanish
+    )
+    child_label = models.CharField(
+        max_length=100, 
+        help_text="Masalan: O'g'lim Ali"
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
