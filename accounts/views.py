@@ -8,7 +8,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.authtoken.models import Token
 
-from .models import User, UserLocation, AppUsage
+from .models import User, UserLocation, AppUsage, FamilyRelation
 from .serializers import (
     RegisterSerializer, 
     UserSerializer, 
@@ -23,17 +23,16 @@ from drf_yasg import openapi
 # --- RO'YXATDAN O'TISH ---
 class RegisterView(generics.CreateAPIView):
     serializer_class = RegisterSerializer
-    permission_classes = [permissions.AllowAny] # Ochiq qolishi shart
+    permission_classes = [permissions.AllowAny]
 
     def perform_create(self, serializer):
         otp_code = str(random.randint(100000, 999999))
         user = serializer.save(otp_code=otp_code)
-        # O'zbekiston vaqti bilan terminalga chiqarish
         print(f"\n[{timezone.now()}] >>>> SMS YUBORILDI {user.phone}: {otp_code} <<<<\n")
 
 # --- KODNI TASDIQLASH (VERIFY) ---
 class VerifyOTPView(APIView):
-    permission_classes = [permissions.AllowAny] # Ochiq qolishi shart
+    permission_classes = [permissions.AllowAny]
 
     def post(self, request):
         serializer = VerifyOTPSerializer(data=request.data)
@@ -52,7 +51,7 @@ class VerifyOTPView(APIView):
 # --- KIRISH (LOGIN) ---
 class LoginView(generics.GenericAPIView):
     serializer_class = LoginSerializer
-    permission_classes = [permissions.AllowAny] # Ochiq qolishi shart
+    permission_classes = [permissions.AllowAny]
 
     def post(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -65,15 +64,43 @@ class LoginView(generics.GenericAPIView):
                 token, _ = Token.objects.get_or_create(user=user)
                 return Response({
                     "token": token.key,
-                    "full_name": user.full_name
+                    "full_name": user.full_name,
+                    "role": user.role
                 }, status=status.HTTP_200_OK)
             return Response({"error": "Telefon yoki parol xato!"}, status=status.HTTP_401_UNAUTHORIZED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+# --- FARZANDNI BIRIKTIRISH (OTA-ONA UCHUN) ---
+class AddChildView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    @swagger_auto_schema(
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=['child_phone'],
+            properties={'child_phone': openapi.Schema(type=openapi.TYPE_STRING, description="Farzand telefon raqami")}
+        )
+    )
+    def post(self, request):
+        if request.user.role != 'parent':
+            return Response({"error": "Faqat ota-onalar farzand qo'sha oladi"}, status=status.HTTP_403_FORBIDDEN)
+        
+        child_phone = request.data.get('child_phone')
+        child = User.objects.filter(phone=child_phone, role='child').first()
+        
+        if not child:
+            return Response({"error": "Bunday raqamli farzand topilmadi yoki u 'Farzand' rolida emas"}, status=status.HTTP_404_NOT_FOUND)
+        
+        relation, created = FamilyRelation.objects.get_or_create(parent=request.user, child=child)
+        if not created:
+            return Response({"message": "Bu farzand allaqachon biriktirilgan"}, status=status.HTTP_400_BAD_REQUEST)
+            
+        return Response({"message": f"{child.full_name} muvaffaqiyatli biriktirildi"}, status=status.HTTP_201_CREATED)
+
 # --- GEOLOKATSIYA (LOCATION) ---
 class LocationAPIView(generics.ListCreateAPIView):
     serializer_class = LocationSerializer
-    permission_classes = [permissions.IsAuthenticated] # FAQAT LOGIN QILGANLARGA
+    permission_classes = [permissions.IsAuthenticated]
 
     @swagger_auto_schema(
         manual_parameters=[
@@ -85,26 +112,29 @@ class LocationAPIView(generics.ListCreateAPIView):
         return super().get(request, *args, **kwargs)
 
     def get_queryset(self):
+        user = self.request.user
         phone = self.request.query_params.get('phone')
         period = self.request.query_params.get('period')
         
-        queryset = UserLocation.objects.all()
+        if user.role == 'parent':
+            queryset = UserLocation.objects.filter(user__parent_relation__parent=user)
+        else:
+            queryset = UserLocation.objects.filter(user=user)
+
         if phone:
             queryset = queryset.filter(user__phone=phone)
         if period:
-            # O'zbekiston vaqt zonasini hisobga oladi
             start_date = timezone.now() - timedelta(days=int(period))
             queryset = queryset.filter(created_at__gte=start_date)
         return queryset.order_by('-created_at')
 
     def perform_create(self, serializer):
-        # Login qilgan userning o'ziga bog'laymiz
         serializer.save(user=self.request.user)
 
 # --- APP USAGE (ILOVA NAZORATI) ---
 class AppUsageAPIView(generics.ListCreateAPIView):
     serializer_class = AppUsageSerializer
-    permission_classes = [permissions.IsAuthenticated] # FAQAT LOGIN QILGANLARGA
+    permission_classes = [permissions.IsAuthenticated]
 
     @swagger_auto_schema(
         manual_parameters=[
@@ -116,10 +146,15 @@ class AppUsageAPIView(generics.ListCreateAPIView):
         return super().get(request, *args, **kwargs)
 
     def get_queryset(self):
+        user = self.request.user
         phone = self.request.query_params.get('phone')
         period = self.request.query_params.get('period')
         
-        queryset = AppUsage.objects.all()
+        if user.role == 'parent':
+            queryset = AppUsage.objects.filter(user__parent_relation__parent=user)
+        else:
+            queryset = AppUsage.objects.filter(user=user)
+
         if phone:
             queryset = queryset.filter(user__phone=phone)
         if period:
@@ -129,5 +164,4 @@ class AppUsageAPIView(generics.ListCreateAPIView):
         return queryset.order_by('-created_at')
 
     def perform_create(self, serializer):
-        # Login qilgan userning o'ziga bog'laymiz
         serializer.save(user=self.request.user)

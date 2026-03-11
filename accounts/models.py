@@ -58,6 +58,19 @@ class User(AbstractUser):
     def __str__(self):
         return f"{self.full_name} ({self.get_role_display()})"
     
+class FamilyRelation(models.Model):
+    parent = models.ForeignKey(User, on_delete=models.CASCADE, related_name='children_relations', limit_choices_to={'role': 'parent'}, verbose_name="Ota-ona")
+    child = models.OneToOneField(User, on_delete=models.CASCADE, related_name='parent_relation', limit_choices_to={'role': 'child'}, verbose_name="Farzand")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Yaratilgan vaqt")
+
+    class Meta:
+        verbose_name = "Oila aloqasi"
+        verbose_name_plural = "Oila aloqalari"
+        unique_together = ('parent', 'child')
+
+    def __str__(self):
+        return f"{self.parent.full_name} -> {self.child.full_name}"
+
 class UserLocation(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='locations', verbose_name="Foydalanuvchi")
     lat = models.FloatField(verbose_name="Kenglik (lat)")
