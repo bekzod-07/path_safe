@@ -171,10 +171,18 @@ from rest_framework.generics import ListAPIView
 from rest_framework.views import APIView
 
 # --- FARZANDLARNI BOSHQARISH (GET, POST, DELETE) ---
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import permissions, status
+from drf_yasg.utils import swagger_auto_schema
+from drf_yasg import openapi
+from .models import User, FamilyRelation
+from .serializers import ChildSerializer
+
 class FamilyManagementView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
-    # 1. FARZANDLAR RO'YXATI (GET) - Telefon raqami bo'yicha qidirish imkoniyati bilan
+    # 1. FARZANDLAR RO'YXATI (GET)
     @swagger_auto_schema(
         tags=['family'],
         operation_summary="Ota-onaga biriktirilgan farzandlar ro'yxati",
@@ -183,81 +191,81 @@ class FamilyManagementView(APIView):
         ]
     )
     def get(self, request):
-        if request.user.role != 'parent':
-            return Response({"error": "Faqat ota-onalar ko'ra oladi"}, status=403)
-        
+        # Faqat ota-ona o'ziga bog'langanlarni ko'radi
         child_phone = request.query_params.get('child_phone')
         queryset = User.objects.filter(parent_relation__parent=request.user)
         
         if child_phone:
             queryset = queryset.filter(phone=child_phone)
             
-        serializer = ChildSerializer(queryset, many=True)
+        serializer = ChildSerializer(queryset, many=True, context={'request': request})
         return Response(serializer.data)
 
-    # 2. QO'SHISH (POST) - Bu allaqachon telefon raqami orqali edi
+    # 2. BIRIKTIRISH (POST)
     @swagger_auto_schema(
         tags=['family'],
-        operation_summary="Farzandni telefon raqami orqali qo'shish",
+        operation_summary="Ota-onaga farzandni telefon raqamlar orqali biriktirish",
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
-            required=['child_phone'],
-            properties={'child_phone': openapi.Schema(type=openapi.TYPE_STRING, example="+998901234567")}
-        )
-    )
-    def post(self, request):
-        if request.user.role != 'parent':
-            return Response({"error": "Faqat ota-onalar farzand qo'sha oladi"}, status=403)
-        
-        child_phone = request.data.get('child_phone')
-        child = User.objects.filter(phone=child_phone, role='child').first()
-        
-        if not child:
-            return Response({"error": "Bunday raqamli farzand topilmadi"}, status=404)
-        
-        relation, created = FamilyRelation.objects.get_or_create(parent=request.user, child=child)
-        if not created:
-            return Response({"message": "Bu farzand allaqachon biriktirilgan"}, status=400)
-            
-        return Response({"message": f"{child.full_name} muvaffaqiyatli qo'shildi"}, status=201)
-
-    # 3. O'CHIRISH (DELETE) - Endi ID emas, telefon raqami orqali
-# 2. YANGI FARZAND QO'SHISH (POST)
-    @swagger_auto_schema(
-        tags=['family'],
-        operation_summary="Farzandni ism va telefon raqami orqali qo'shish",
-        request_body=openapi.Schema(
-            type=openapi.TYPE_OBJECT,
-            required=['child_phone', 'child_label'],
+            required=['parent_phone', 'child_phone', 'child_label'],
             properties={
+                'parent_phone': openapi.Schema(type=openapi.TYPE_STRING, example="+998901112233"),
                 'child_phone': openapi.Schema(type=openapi.TYPE_STRING, example="+998995577784"),
-                'child_label': openapi.Schema(type=openapi.TYPE_STRING, example="O'g'lim Bekzod") # Ism bu yerda keladi
+                'child_label': openapi.Schema(type=openapi.TYPE_STRING, example="O'g'lim Bekzod")
             }
         )
     )
     def post(self, request):
-        if request.user.role != 'parent':
-            return Response({"error": "Faqat ota-onalar farzand qo'sha oladi"}, status=403)
-        
-        child_phone = request.data.get('child_phone')
-        child_label = request.data.get('child_label') # Ota-ona bergan nom
-        
-        if not child_label:
-            return Response({"error": "Farzandga nom (label) bering"}, status=400)
+        p_phone = request.data.get('parent_phone')
+        c_phone = request.data.get('child_phone')
+        label = request.data.get('child_label')
 
-        child = User.objects.filter(phone=child_phone, role='child').first()
-        
+        if not all([p_phone, c_phone, label]):
+            return Response({"error": "Barcha maydonlarni to'ldiring!"}, status=status.HTTP_400_BAD_REQUEST)
+
+        parent = User.objects.filter(phone=p_phone, role='parent').first()
+        child = User.objects.filter(phone=c_phone, role='child').first()
+
+        if not parent:
+            return Response({"error": "Ota-ona topilmadi!"}, status=status.HTTP_404_NOT_FOUND)
         if not child:
-            return Response({"error": "Bunday raqamli farzand topilmadi"}, status=404)
-        
-        # get_or_create o'rniga update_or_create ishlatsak, ism o'zgarsa yangilab ketadi
+            return Response({"error": "Bunday raqamli farzand topilmadi!"}, status=status.HTTP_404_NOT_FOUND)
+
         relation, created = FamilyRelation.objects.update_or_create(
-            parent=request.user, 
+            parent=parent,
             child=child,
-            defaults={'child_label': child_label}
+            defaults={'child_label': label}
         )
+
+        msg = "biriktirildi" if created else "ma'lumotlari yangilandi"
+        return Response({
+            "status": "success",
+            "message": f"{parent.full_name}ga {child.full_name} ({label}) {msg}!"
+        }, status=status.HTTP_201_CREATED)
+
+    # 3. O'CHIRISH (DELETE)
+    @swagger_auto_schema(
+        tags=['family'],
+        operation_summary="Farzandni ota-onadan raqamlar orqali uzish",
+        manual_parameters=[
+            openapi.Parameter('parent_phone', openapi.IN_QUERY, type=openapi.TYPE_STRING, required=True, description="Ota-ona telefon raqami"),
+            openapi.Parameter('child_phone', openapi.IN_QUERY, type=openapi.TYPE_STRING, required=True, description="Farzand telefon raqami")
+        ]
+    )
+    def delete(self, request):
+        p_phone = request.query_params.get('parent_phone')
+        c_phone = request.query_params.get('child_phone')
+
+        if not p_phone or not c_phone:
+            return Response({"error": "Ota-ona va farzand raqami yuborilishi shart!"}, status=status.HTTP_400_BAD_REQUEST)
+
+        relation = FamilyRelation.objects.filter(
+            parent__phone=p_phone, 
+            child__phone=c_phone
+        ).first()
         
-        status_code = 201 if created else 200
-        msg = "muvaffaqiyatli qo'shildi" if created else "ma'lumotlari yangilandi"
+        if relation:
+            relation.delete()
+            return Response({"message": "Farzand muvaffaqiyatli olib tashlandi"}, status=status.HTTP_200_OK)
         
-        return Response({"message": f"{child.full_name} ({child_label}) {msg}"}, status=status_code)
+        return Response({"error": "Bunday birikma topilmadi"}, status=status.HTTP_404_NOT_FOUND)
