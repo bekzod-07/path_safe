@@ -205,27 +205,27 @@ class LocationAPIView(generics.ListCreateAPIView):
         return super().get(request, *args, **kwargs)
 
     def get_queryset(self):
-    user = self.request.user
-    phone = self.request.query_params.get("phone")
-    period = self.request.query_params.get("period")
+        user = self.request.user
+        phone = self.request.query_params.get("phone")
+        period = self.request.query_params.get("period")
 
-    if user.role == User.ROLE_PARENT:
-        queryset = AppUsage.objects.filter(
-            user__parent_relation__parent=user
-        ).select_related("user")
-    else:
-        queryset = AppUsage.objects.filter(user=user).select_related("user")
+        if user.role == User.ROLE_PARENT:
+            queryset = AppUsage.objects.filter(
+                user__parent_relation__parent=user
+            ).select_related("user")
+        else:
+            queryset = AppUsage.objects.filter(user=user).select_related("user")
 
-    if phone:
-        queryset = queryset.filter(user__phone=phone)
+        if phone:
+            queryset = queryset.filter(user__phone=phone)
 
-    if period:
-        try:
-            days = int(period)
-            start_date = timezone.now() - timedelta(days=days)
-            queryset = queryset.filter(updated_at__gte=start_date)
-        except ValueError:
-            pass
+        if period:
+            try:
+                days = int(period)
+                start_date = timezone.now() - timedelta(days=days)
+                queryset = queryset.filter(updated_at__gte=start_date)
+            except ValueError:
+                pass
 
     return queryset.order_by("-updated_at")
 
