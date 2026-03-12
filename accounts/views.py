@@ -25,14 +25,28 @@ from .serializers import (
     FamilyDeleteSerializer,
 )
 
-import random
-from django.conf import settings
+
+# =========================
+# OTP SETTINGS
+# =========================
+
+TEST_OTP_CODE = "123456"
+ALLOW_TEST_OTP_FOR_ALL_USERS = True
+
 
 def generate_otp():
-    if settings.DEBUG:
-        return "123456"
+    """
+    Register paytida userga saqlanadigan OTP.
+    Test rejimda hammasiga 123456 beriladi.
+    """
+    if ALLOW_TEST_OTP_FOR_ALL_USERS:
+        return TEST_OTP_CODE
     return str(random.randint(100000, 999999))
 
+
+# =========================
+# AUTH: REGISTER
+# =========================
 
 class RegisterView(generics.CreateAPIView):
     serializer_class = RegisterSerializer
@@ -56,11 +70,16 @@ class RegisterView(generics.CreateAPIView):
         return Response(
             {
                 "message": "Foydalanuvchi yaratildi. OTP yuborildi.",
+                "otp_test_code": otp_code if ALLOW_TEST_OTP_FOR_ALL_USERS else None,
                 "user": UserSerializer(user).data,
             },
             status=status.HTTP_201_CREATED,
         )
 
+
+# =========================
+# AUTH: VERIFY OTP
+# =========================
 
 class VerifyOTPView(APIView):
     permission_classes = [permissions.AllowAny]
@@ -77,10 +96,27 @@ class VerifyOTPView(APIView):
         phone = serializer.validated_data["phone"]
         code = serializer.validated_data["code"]
 
-        user = User.objects.filter(phone=phone, otp_code=code).first()
+        user = User.objects.filter(phone=phone).first()
         if not user:
             return Response(
-                {"error": "Kod noto‘g‘ri yoki foydalanuvchi topilmadi"},
+                {"error": "Foydalanuvchi topilmadi"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # Test rejim: hamma user uchun 123456 qabul qilinadi
+        if ALLOW_TEST_OTP_FOR_ALL_USERS and code == TEST_OTP_CODE:
+            user.is_verified = True
+            user.otp_code = None
+            user.save(update_fields=["is_verified", "otp_code"])
+            return Response(
+                {"message": "Muvaffaqiyatli tasdiqlandi"},
+                status=status.HTTP_200_OK,
+            )
+
+        # Oddiy rejim: bazadagi OTP bilan tekshiradi
+        if user.otp_code != code:
+            return Response(
+                {"error": "Kod noto‘g‘ri"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -93,6 +129,10 @@ class VerifyOTPView(APIView):
             status=status.HTTP_200_OK,
         )
 
+
+# =========================
+# AUTH: LOGIN
+# =========================
 
 class LoginView(generics.GenericAPIView):
     serializer_class = LoginSerializer
@@ -136,6 +176,10 @@ class LoginView(generics.GenericAPIView):
         )
 
 
+# =========================
+# LOCATION
+# =========================
+
 class LocationAPIView(generics.ListCreateAPIView):
     serializer_class = LocationSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -143,8 +187,18 @@ class LocationAPIView(generics.ListCreateAPIView):
     @swagger_auto_schema(
         tags=["location"],
         manual_parameters=[
-            openapi.Parameter("phone", openapi.IN_QUERY, description="Telefon raqam", type=openapi.TYPE_STRING),
-            openapi.Parameter("period", openapi.IN_QUERY, description="Kunlar soni", type=openapi.TYPE_INTEGER),
+            openapi.Parameter(
+                "phone",
+                openapi.IN_QUERY,
+                description="Telefon raqam",
+                type=openapi.TYPE_STRING,
+            ),
+            openapi.Parameter(
+                "period",
+                openapi.IN_QUERY,
+                description="Kunlar soni",
+                type=openapi.TYPE_INTEGER,
+            ),
         ],
     )
     def get(self, request, *args, **kwargs):
@@ -195,6 +249,10 @@ class LocationAPIView(generics.ListCreateAPIView):
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
+# =========================
+# APP USAGE
+# =========================
+
 class AppUsageAPIView(generics.ListCreateAPIView):
     serializer_class = AppUsageSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -202,8 +260,18 @@ class AppUsageAPIView(generics.ListCreateAPIView):
     @swagger_auto_schema(
         tags=["app-usage"],
         manual_parameters=[
-            openapi.Parameter("phone", openapi.IN_QUERY, description="Telefon raqam", type=openapi.TYPE_STRING),
-            openapi.Parameter("period", openapi.IN_QUERY, description="Kunlar soni", type=openapi.TYPE_INTEGER),
+            openapi.Parameter(
+                "phone",
+                openapi.IN_QUERY,
+                description="Telefon raqam",
+                type=openapi.TYPE_STRING,
+            ),
+            openapi.Parameter(
+                "period",
+                openapi.IN_QUERY,
+                description="Kunlar soni",
+                type=openapi.TYPE_INTEGER,
+            ),
         ],
     )
     def get(self, request, *args, **kwargs):
@@ -253,6 +321,10 @@ class AppUsageAPIView(generics.ListCreateAPIView):
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
+# =========================
+# FAMILY
+# =========================
+
 class FamilyManagementView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -283,7 +355,6 @@ class FamilyManagementView(APIView):
             return blocked
 
         child_phone = request.query_params.get("child_phone")
-
         relations = FamilyRelation.objects.filter(parent=request.user).select_related("child")
 
         if child_phone:
@@ -350,7 +421,10 @@ class FamilyManagementView(APIView):
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
             properties={
-                "child_phone": openapi.Schema(type=openapi.TYPE_STRING, example="+998901112233"),
+                "child_phone": openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    example="+998901112233",
+                ),
             },
         ),
     )

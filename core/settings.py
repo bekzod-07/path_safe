@@ -6,7 +6,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = 'django-insecure-n@a&7s9wgq%a6r%tjeh@jbj-i#nbkvwk@huv9j*uus0!7&968b'
 
 # SERVERDA HAR DOIM FALSE QILING
-DEBUG = False
+DEBUG = True
 
 # Domenlar
 ALLOWED_HOSTS = ['api.kyotosushi.uz', 'www.api.kyotosushi.uz']
