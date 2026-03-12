@@ -9,7 +9,7 @@ from .models import User, UserLocation, AppUsage, FamilyRelation
 # INLINE'lar
 # =========================
 
-class FamilyRelationInline(admin.TabularInline):
+class FamilyRelationParentInline(admin.TabularInline):
     model = FamilyRelation
     fk_name = "parent"
     extra = 0
@@ -20,7 +20,7 @@ class FamilyRelationInline(admin.TabularInline):
     verbose_name_plural = "Biriktirilgan farzandlar"
 
 
-class ChildRelationInline(admin.TabularInline):
+class FamilyRelationChildInline(admin.TabularInline):
     model = FamilyRelation
     fk_name = "child"
     extra = 0
@@ -37,8 +37,6 @@ class UserLocationInline(admin.TabularInline):
     fields = ("lat", "lng", "address", "created_at")
     readonly_fields = ("lat", "lng", "address", "created_at")
     can_delete = False
-    verbose_name = "Lokatsiya"
-    verbose_name_plural = "So‘nggi lokatsiyalar"
     ordering = ("-created_at",)
 
 
@@ -48,8 +46,6 @@ class AppUsageInline(admin.TabularInline):
     fields = ("app_name", "usage_time", "created_at")
     readonly_fields = ("app_name", "usage_time", "created_at")
     can_delete = False
-    verbose_name = "App usage"
-    verbose_name_plural = "Ilova ishlatilishlari"
     ordering = ("-created_at",)
 
 
@@ -84,7 +80,7 @@ class UserAdmin(BaseUserAdmin):
     search_fields = ("full_name", "phone")
     ordering = ("-date_joined",)
     list_per_page = 25
-    autocomplete_fields = ()
+
     readonly_fields = (
         "date_joined",
         "last_login",
@@ -148,38 +144,34 @@ class UserAdmin(BaseUserAdmin):
         }),
     )
 
-    inlines = [FamilyRelationInline, ChildRelationInline, UserLocationInline, AppUsageInline]
+    inlines = [
+        FamilyRelationParentInline,
+        FamilyRelationChildInline,
+        UserLocationInline,
+        AppUsageInline,
+    ]
 
     def get_queryset(self, request):
-        qs = super().get_queryset(request)
-        return qs.prefetch_related(
-            "parent_links__child",
-            "child_links__parent",
-        )
+        # Hech qanday taxminiy related_name ishlatmaymiz
+        return super().get_queryset(request)
 
     @admin.display(description="Tasdiq")
     def verified_badge(self, obj):
         if obj.is_verified:
             return format_html(
-                '<span style="color: white; background: #16a34a; padding: 3px 8px; border-radius: 10px;">Tasdiqlangan</span>'
+                '<span style="color:white;background:#16a34a;padding:3px 8px;border-radius:10px;">Tasdiqlangan</span>'
             )
         return format_html(
-            '<span style="color: white; background: #dc2626; padding: 3px 8px; border-radius: 10px;">Tasdiqlanmagan</span>'
+            '<span style="color:white;background:#dc2626;padding:3px 8px;border-radius:10px;">Tasdiqlanmagan</span>'
         )
 
     @admin.display(description="Ota-onalar soni")
     def parent_count(self, obj):
-        try:
-            return obj.child_links.count()
-        except Exception:
-            return 0
+        return FamilyRelation.objects.filter(child=obj).count()
 
     @admin.display(description="Farzandlar soni")
     def child_count(self, obj):
-        try:
-            return obj.parent_links.count()
-        except Exception:
-            return 0
+        return FamilyRelation.objects.filter(parent=obj).count()
 
     @admin.display(description="Holat")
     def verification_status_text(self, obj):
@@ -210,8 +202,6 @@ class FamilyRelationAdmin(admin.ModelAdmin):
         "created_at",
         "parent__is_verified",
         "child__is_verified",
-        "parent__role",
-        "child__role",
     )
     search_fields = (
         "parent__full_name",
@@ -224,18 +214,6 @@ class FamilyRelationAdmin(admin.ModelAdmin):
     readonly_fields = ("created_at",)
     ordering = ("-created_at",)
     list_select_related = ("parent", "child")
-    list_per_page = 25
-
-    fieldsets = (
-        ("Biriktirish ma'lumotlari", {
-            "fields": (
-                "parent",
-                "child",
-                "child_label",
-                "created_at",
-            )
-        }),
-    )
 
     @admin.display(description="Ota-ona raqami")
     def parent_phone(self, obj):
@@ -247,9 +225,7 @@ class FamilyRelationAdmin(admin.ModelAdmin):
 
     @admin.display(description="Farzand holati")
     def child_verified(self, obj):
-        if obj.child.is_verified:
-            return "Tasdiqlangan"
-        return "Tasdiqlanmagan"
+        return "Tasdiqlangan" if obj.child.is_verified else "Tasdiqlanmagan"
 
 
 # =========================
@@ -282,7 +258,6 @@ class UserLocationAdmin(admin.ModelAdmin):
     readonly_fields = ("created_at",)
     ordering = ("-created_at",)
     list_select_related = ("user",)
-    list_per_page = 30
 
     @admin.display(description="Telefon")
     def user_phone(self, obj):
@@ -329,7 +304,6 @@ class AppUsageAdmin(admin.ModelAdmin):
     readonly_fields = ("created_at",)
     ordering = ("-created_at",)
     list_select_related = ("user",)
-    list_per_page = 30
 
     @admin.display(description="Telefon")
     def user_phone(self, obj):
