@@ -9,7 +9,7 @@ SECRET_KEY = 'django-insecure-n@a&7s9wgq%a6r%tjeh@jbj-i#nbkvwk@huv9j*uus0!7&968b
 DEBUG = False
 
 # Domenlar
-ALLOWED_HOSTS = ['api.kyotosushi.uz', 'www.api.kyotosushi.uz', '127.0.0.1', 'localhost']
+ALLOWED_HOSTS = ['api.kyotosushi.uz', 'www.api.kyotosushi.uz']
 
 # --- HTTPS VA XAVFSIZLIK SOZLAMALARI ---
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
@@ -57,13 +57,11 @@ INSTALLED_APPS = [
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework.authentication.TokenAuthentication',
-        'rest_framework.authentication.SessionAuthentication', 
     ],
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',
     ],
 }
-
 AUTH_USER_MODEL = 'accounts.User'
 
 MIDDLEWARE = [

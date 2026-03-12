@@ -1,284 +1,378 @@
 import random
 from datetime import timedelta
+
 from django.utils import timezone
 from django.contrib.auth import authenticate
 
 from rest_framework import status, generics, permissions
+from rest_framework.authtoken.models import Token
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework.authtoken.models import Token
+
+from drf_yasg import openapi
+from drf_yasg.utils import swagger_auto_schema
 
 from .models import User, UserLocation, AppUsage, FamilyRelation
 from .serializers import (
-    RegisterSerializer, 
-    UserSerializer, 
-    LoginSerializer, 
-    VerifyOTPSerializer, 
+    RegisterSerializer,
+    LoginSerializer,
+    VerifyOTPSerializer,
+    UserSerializer,
     LocationSerializer,
     AppUsageSerializer,
-    ChildSerializer
+    FamilyChildSerializer,
+    FamilyUpsertSerializer,
+    FamilyDeleteSerializer,
 )
-from drf_yasg.utils import swagger_auto_schema
-from drf_yasg import openapi
 
-# --- RO'YXATDAN O'TISH ---
+
+def generate_otp():
+    return str(random.randint(100000, 999999))
+
+
 class RegisterView(generics.CreateAPIView):
     serializer_class = RegisterSerializer
     permission_classes = [permissions.AllowAny]
 
-    def perform_create(self, serializer):
-        otp_code = str(random.randint(100000, 999999))
-        user = serializer.save(otp_code=otp_code)
-        print(f"\n[{timezone.now()}] >>>> SMS YUBORILDI {user.phone}: {otp_code} <<<<\n")
+    @swagger_auto_schema(
+        tags=["auth"],
+        operation_summary="Ro‘yxatdan o‘tish",
+        request_body=RegisterSerializer,
+        responses={201: UserSerializer},
+    )
+    def post(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
 
-# --- KODNI TASDIQLASH (VERIFY) ---
+        otp_code = generate_otp()
+        user = serializer.save(otp_code=otp_code, is_verified=False)
+
+        print(f"\n[{timezone.now()}] >>> SMS YUBORILDI {user.phone}: {otp_code} <<<\n")
+
+        return Response(
+            {
+                "message": "Foydalanuvchi yaratildi. OTP yuborildi.",
+                "user": UserSerializer(user).data,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
 class VerifyOTPView(APIView):
     permission_classes = [permissions.AllowAny]
 
+    @swagger_auto_schema(
+        tags=["auth"],
+        operation_summary="OTP kodni tasdiqlash",
+        request_body=VerifyOTPSerializer,
+    )
     def post(self, request):
         serializer = VerifyOTPSerializer(data=request.data)
-        if serializer.is_valid():
-            phone = serializer.validated_data['phone']
-            code = serializer.validated_data['code']
-            
-            user = User.objects.filter(phone=phone, otp_code=code).first()
-            if user:
-                user.is_verified = True
-                user.save()
-                return Response({"message": "Muvaffaqiyatli tasdiqlandi!"}, status=status.HTTP_200_OK)
-            return Response({"error": "Kod noto'g'ri!"}, status=status.HTTP_400_BAD_REQUEST)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        serializer.is_valid(raise_exception=True)
 
-# --- KIRISH (LOGIN) ---
+        phone = serializer.validated_data["phone"]
+        code = serializer.validated_data["code"]
+
+        user = User.objects.filter(phone=phone, otp_code=code).first()
+        if not user:
+            return Response(
+                {"error": "Kod noto‘g‘ri yoki foydalanuvchi topilmadi"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        user.is_verified = True
+        user.otp_code = None
+        user.save(update_fields=["is_verified", "otp_code"])
+
+        return Response(
+            {"message": "Muvaffaqiyatli tasdiqlandi"},
+            status=status.HTTP_200_OK,
+        )
+
+
 class LoginView(generics.GenericAPIView):
     serializer_class = LoginSerializer
     permission_classes = [permissions.AllowAny]
 
+    @swagger_auto_schema(
+        tags=["auth"],
+        operation_summary="Tizimga kirish",
+        request_body=LoginSerializer,
+    )
     def post(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
-        if serializer.is_valid():
-            phone = serializer.validated_data.get('phone')
-            password = serializer.validated_data.get('password')
-            
-            user = authenticate(phone=phone, password=password)
-            if user:
-                token, _ = Token.objects.get_or_create(user=user)
-                return Response({
-                    "token": token.key,
-                    "full_name": user.full_name,
-                    "role": user.role
-                }, status=status.HTTP_200_OK)
-            return Response({"error": "Telefon yoki parol xato!"}, status=status.HTTP_401_UNAUTHORIZED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        serializer.is_valid(raise_exception=True)
 
-# --- FARZANDNI BIRIKTIRISH (OTA-ONA UCHUN) ---
-class AddChildView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+        phone = serializer.validated_data["phone"]
+        password = serializer.validated_data["password"]
 
-    @swagger_auto_schema(
-        request_body=openapi.Schema(
-            type=openapi.TYPE_OBJECT,
-            required=['child_phone'],
-            properties={'child_phone': openapi.Schema(type=openapi.TYPE_STRING, description="Farzand telefon raqami")}
+        user = authenticate(phone=phone, password=password)
+        if not user:
+            return Response(
+                {"error": "Telefon yoki parol xato"},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        if not user.is_verified:
+            return Response(
+                {"error": "Telefon raqam hali tasdiqlanmagan"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        token, _ = Token.objects.get_or_create(user=user)
+
+        return Response(
+            {
+                "token": token.key,
+                "full_name": user.full_name,
+                "phone": user.phone,
+                "role": user.role,
+            },
+            status=status.HTTP_200_OK,
         )
-    )
-    def post(self, request):
-        if request.user.role != 'parent':
-            return Response({"error": "Faqat ota-onalar farzand qo'sha oladi"}, status=status.HTTP_403_FORBIDDEN)
-        
-        child_phone = request.data.get('child_phone')
-        child = User.objects.filter(phone=child_phone, role='child').first()
-        
-        if not child:
-            return Response({"error": "Bunday raqamli farzand topilmadi yoki u 'Farzand' rolida emas"}, status=status.HTTP_404_NOT_FOUND)
-        
-        relation, created = FamilyRelation.objects.get_or_create(parent=request.user, child=child)
-        if not created:
-            return Response({"message": "Bu farzand allaqachon biriktirilgan"}, status=status.HTTP_400_BAD_REQUEST)
-            
-        return Response({"message": f"{child.full_name} muvaffaqiyatli biriktirildi"}, status=status.HTTP_201_CREATED)
 
-# --- GEOLOKATSIYA (LOCATION) ---
+
 class LocationAPIView(generics.ListCreateAPIView):
     serializer_class = LocationSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     @swagger_auto_schema(
+        tags=["location"],
         manual_parameters=[
-            openapi.Parameter('phone', openapi.IN_QUERY, description="Telefon raqam", type=openapi.TYPE_STRING),
-            openapi.Parameter('period', openapi.IN_QUERY, description="Kunlar (1, 7, 30)", type=openapi.TYPE_INTEGER),
-        ]
+            openapi.Parameter("phone", openapi.IN_QUERY, description="Telefon raqam", type=openapi.TYPE_STRING),
+            openapi.Parameter("period", openapi.IN_QUERY, description="Kunlar soni", type=openapi.TYPE_INTEGER),
+        ],
     )
     def get(self, request, *args, **kwargs):
         return super().get(request, *args, **kwargs)
 
     def get_queryset(self):
         user = self.request.user
-        phone = self.request.query_params.get('phone')
-        period = self.request.query_params.get('period')
-        
-        if user.role == 'parent':
-            queryset = UserLocation.objects.filter(user__parent_relation__parent=user)
+        phone = self.request.query_params.get("phone")
+        period = self.request.query_params.get("period")
+
+        if user.role == User.ROLE_PARENT:
+            queryset = UserLocation.objects.filter(
+                user__parent_relation__parent=user
+            ).select_related("user")
         else:
-            queryset = UserLocation.objects.filter(user=user)
+            queryset = UserLocation.objects.filter(user=user).select_related("user")
 
         if phone:
             queryset = queryset.filter(user__phone=phone)
+
         if period:
-            start_date = timezone.now() - timedelta(days=int(period))
-            queryset = queryset.filter(created_at__gte=start_date)
-        return queryset.order_by('-created_at')
+            try:
+                days = int(period)
+                start_date = timezone.now() - timedelta(days=days)
+                queryset = queryset.filter(created_at__gte=start_date)
+            except ValueError:
+                pass
 
-    def perform_create(self, serializer):
-        serializer.save(user=self.request.user)
+        return queryset.order_by("-created_at")
 
-# --- APP USAGE (ILOVA NAZORATI) ---
+    @swagger_auto_schema(
+        tags=["location"],
+        operation_summary="Foydalanuvchining geolokatsiyasini saqlash",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=["lat", "lng"],
+            properties={
+                "lat": openapi.Schema(type=openapi.TYPE_NUMBER, example=41.311081),
+                "lng": openapi.Schema(type=openapi.TYPE_NUMBER, example=69.240562),
+                "address": openapi.Schema(type=openapi.TYPE_STRING, example="Toshkent shahri"),
+            },
+        ),
+    )
+    def post(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save(user=request.user)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
 class AppUsageAPIView(generics.ListCreateAPIView):
     serializer_class = AppUsageSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     @swagger_auto_schema(
+        tags=["app-usage"],
         manual_parameters=[
-            openapi.Parameter('phone', openapi.IN_QUERY, description="Telefon raqam", type=openapi.TYPE_STRING),
-            openapi.Parameter('period', openapi.IN_QUERY, description="Kunlar (1, 7, 30)", type=openapi.TYPE_INTEGER),
-        ]
+            openapi.Parameter("phone", openapi.IN_QUERY, description="Telefon raqam", type=openapi.TYPE_STRING),
+            openapi.Parameter("period", openapi.IN_QUERY, description="Kunlar soni", type=openapi.TYPE_INTEGER),
+        ],
     )
     def get(self, request, *args, **kwargs):
         return super().get(request, *args, **kwargs)
 
     def get_queryset(self):
         user = self.request.user
-        phone = self.request.query_params.get('phone')
-        period = self.request.query_params.get('period')
-        
-        if user.role == 'parent':
-            queryset = AppUsage.objects.filter(user__parent_relation__parent=user)
+        phone = self.request.query_params.get("phone")
+        period = self.request.query_params.get("period")
+
+        if user.role == User.ROLE_PARENT:
+            queryset = AppUsage.objects.filter(
+                user__parent_relation__parent=user
+            ).select_related("user")
         else:
-            queryset = AppUsage.objects.filter(user=user)
+            queryset = AppUsage.objects.filter(user=user).select_related("user")
 
         if phone:
             queryset = queryset.filter(user__phone=phone)
+
         if period:
-            start_date = timezone.now() - timedelta(days=int(period))
-            queryset = queryset.filter(created_at__gte=start_date)
-            
-        return queryset.order_by('-created_at')
+            try:
+                days = int(period)
+                start_date = timezone.now() - timedelta(days=days)
+                queryset = queryset.filter(created_at__gte=start_date)
+            except ValueError:
+                pass
 
-    def perform_create(self, serializer):
-        serializer.save(user=self.request.user)
+        return queryset.order_by("-created_at")
 
-from rest_framework.generics import ListAPIView
-from rest_framework.views import APIView
+    @swagger_auto_schema(
+        tags=["app-usage"],
+        operation_summary="Ilova ishlatilish ma’lumotini saqlash",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=["app_name", "usage_time"],
+            properties={
+                "app_name": openapi.Schema(type=openapi.TYPE_STRING, example="YouTube"),
+                "usage_time": openapi.Schema(type=openapi.TYPE_INTEGER, example=25),
+            },
+        ),
+    )
+    def post(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save(user=request.user)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
 
-# --- FARZANDLARNI BOSHQARISH (GET, POST, DELETE) ---
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import permissions, status
-from drf_yasg.utils import swagger_auto_schema
-from drf_yasg import openapi
-from .models import User, FamilyRelation
-from .serializers import ChildSerializer
 
 class FamilyManagementView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
-    # 1. FARZANDLAR RO'YXATI (GET)
+    def _ensure_parent(self, request):
+        if request.user.role != User.ROLE_PARENT:
+            return Response(
+                {"error": "Faqat ota-onalar family endpointdan foydalana oladi"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return None
+
     @swagger_auto_schema(
-        tags=['family'],
-        operation_summary="Ota-onaga biriktirilgan farzandlar ro'yxati",
+        tags=["family"],
+        operation_summary="Login qilgan ota-onaga biriktirilgan farzandlar ro‘yxati",
         manual_parameters=[
-            openapi.Parameter('parent_phone', openapi.IN_QUERY, type=openapi.TYPE_STRING, description="Ota-ona telefon raqami (ixtiyoriy)"),
-            openapi.Parameter('child_phone', openapi.IN_QUERY, type=openapi.TYPE_STRING, description="Muayyan farzandni raqami orqali qidirish (ixtiyoriy)")
-        ]
+            openapi.Parameter(
+                "child_phone",
+                openapi.IN_QUERY,
+                type=openapi.TYPE_STRING,
+                description="Muayyan farzandni raqami bo‘yicha qidirish",
+            )
+        ],
+        responses={200: FamilyChildSerializer(many=True)},
     )
     def get(self, request):
-        p_phone = request.query_params.get('parent_phone')
-        child_phone = request.query_params.get('child_phone')
+        blocked = self._ensure_parent(request)
+        if blocked:
+            return blocked
 
-        # Ota-ona raqami orqali yoki login qilgan user orqali FamilyRelation modelidan qidiramiz
-        if p_phone:
-            relations = FamilyRelation.objects.filter(parent__phone=p_phone)
-        else:
-            relations = FamilyRelation.objects.filter(parent=request.user)
+        child_phone = request.query_params.get("child_phone")
+
+        relations = FamilyRelation.objects.filter(parent=request.user).select_related("child")
 
         if child_phone:
             relations = relations.filter(child__phone=child_phone)
 
-        # FamilyRelation'dan 'child' (User) obyektlarini ajratib olamiz
-        children = [rel.child for rel in relations]
-        
-        # Olingan bolalar ro'yxatiga o'sha ota-ona bergan 'child_label'ni ham qo'shib yuborish uchun:
-        # Serializer'ga context orqali ota-onani berib yuboramiz
-        serializer = ChildSerializer(children, many=True, context={'request': request})
-        return Response(serializer.data)
+        serializer = FamilyChildSerializer(relations, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
-    # 2. BIRIKTIRISH (POST)
     @swagger_auto_schema(
-        tags=['family'],
-        operation_summary="Ota-onaga farzandni telefon raqamlar orqali biriktirish",
-        request_body=openapi.Schema(
-            type=openapi.TYPE_OBJECT,
-            required=['parent_phone', 'child_phone', 'child_label'],
-            properties={
-                'parent_phone': openapi.Schema(type=openapi.TYPE_STRING, example="+998901112233"),
-                'child_phone': openapi.Schema(type=openapi.TYPE_STRING, example="+998995577784"),
-                'child_label': openapi.Schema(type=openapi.TYPE_STRING, example="O'g'lim Bekzod")
-            }
-        )
+        tags=["family"],
+        operation_summary="Farzandni ota-onaga biriktirish yoki labelni yangilash",
+        request_body=FamilyUpsertSerializer,
     )
     def post(self, request):
-        p_phone = request.data.get('parent_phone')
-        c_phone = request.data.get('child_phone')
-        label = request.data.get('child_label')
+        blocked = self._ensure_parent(request)
+        if blocked:
+            return blocked
 
-        if not all([p_phone, c_phone, label]):
-            return Response({"error": "Barcha maydonlarni to'ldiring!"}, status=status.HTTP_400_BAD_REQUEST)
+        serializer = FamilyUpsertSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
 
-        parent = User.objects.filter(phone=p_phone, role='parent').first()
-        child = User.objects.filter(phone=c_phone, role='child').first()
+        child_phone = serializer.validated_data["child_phone"]
+        child_label = serializer.validated_data["child_label"]
 
-        if not parent:
-            return Response({"error": "Ota-ona topilmadi!"}, status=status.HTTP_404_NOT_FOUND)
+        child = User.objects.filter(phone=child_phone, role=User.ROLE_CHILD).first()
         if not child:
-            return Response({"error": "Bunday raqamli farzand topilmadi!"}, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {"error": "Bunday raqamli farzand topilmadi"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
 
-        # update_or_create: agar bog'lanish bo'lsa ismini yangilaydi, yo'q bo'lsa yaratadi
         relation, created = FamilyRelation.objects.update_or_create(
-            parent=parent,
+            parent=request.user,
             child=child,
-            defaults={'child_label': label}
+            defaults={"child_label": child_label},
         )
 
-        msg = "biriktirildi" if created else "ma'lumotlari yangilandi"
-        return Response({
-            "status": "success",
-            "message": f"{parent.full_name}ga {child.full_name} ({label}) {msg}!"
-        }, status=status.HTTP_201_CREATED)
+        return Response(
+            {
+                "status": "success",
+                "created": created,
+                "message": (
+                    f"{child.full_name} muvaffaqiyatli biriktirildi"
+                    if created
+                    else f"{child.full_name} uchun label yangilandi"
+                ),
+                "child": FamilyChildSerializer(relation).data,
+            },
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
 
-    # 3. O'CHIRISH (DELETE)
     @swagger_auto_schema(
-        tags=['family'],
-        operation_summary="Farzandni ota-onadan raqamlar orqali uzish",
+        tags=["family"],
+        operation_summary="Farzandni ota-onadan uzish",
         manual_parameters=[
-            openapi.Parameter('parent_phone', openapi.IN_QUERY, type=openapi.TYPE_STRING, required=True, description="Ota-ona telefon raqami"),
-            openapi.Parameter('child_phone', openapi.IN_QUERY, type=openapi.TYPE_STRING, required=True, description="Farzand telefon raqami")
-        ]
+            openapi.Parameter(
+                "child_phone",
+                openapi.IN_QUERY,
+                type=openapi.TYPE_STRING,
+                required=False,
+                description="Farzand telefon raqami",
+            )
+        ],
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                "child_phone": openapi.Schema(type=openapi.TYPE_STRING, example="+998901112233"),
+            },
+        ),
     )
     def delete(self, request):
-        p_phone = request.query_params.get('parent_phone')
-        c_phone = request.query_params.get('child_phone')
+        blocked = self._ensure_parent(request)
+        if blocked:
+            return blocked
 
-        if not p_phone or not c_phone:
-            return Response({"error": "Ota-ona va farzand raqami yuborilishi shart!"}, status=status.HTTP_400_BAD_REQUEST)
+        child_phone = request.query_params.get("child_phone") or request.data.get("child_phone")
 
-        # Ota-ona va farzand raqami bo'yicha FamilyRelation'ni topib o'chiramiz
+        serializer = FamilyDeleteSerializer(data={"child_phone": child_phone})
+        serializer.is_valid(raise_exception=True)
+
         relation = FamilyRelation.objects.filter(
-            parent__phone=p_phone, 
-            child__phone=c_phone
+            parent=request.user,
+            child__phone=serializer.validated_data["child_phone"],
         ).first()
-        
-        if relation:
-            relation.delete()
-            return Response({"message": "Farzand muvaffaqiyatli olib tashlandi"}, status=status.HTTP_200_OK)
-        
-        return Response({"error": "Bunday birikma topilmadi"}, status=status.HTTP_404_NOT_FOUND)
+
+        if not relation:
+            return Response(
+                {"error": "Bunday birikma topilmadi"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        relation.delete()
+        return Response(
+            {"message": "Farzand muvaffaqiyatli olib tashlandi"},
+            status=status.HTTP_200_OK,
+        )
