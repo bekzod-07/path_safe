@@ -360,57 +360,28 @@ class AppUsageAPIView(generics.ListCreateAPIView):
 
         phone = serializer.validated_data["phone"].strip()
         app_name = serializer.validated_data["app_name"].strip()
-        incoming_usage_time = serializer.validated_data["usage_time"]
+        usage_time = serializer.validated_data["usage_time"]
 
         target_user = User.objects.filter(phone=phone).first()
 
         if not target_user:
             return Response(
-                {"error": "Bunday telefon raqamli foydalanuvchi topilmadi"},
+                {"error": "Foydalanuvchi topilmadi"},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        # Child faqat o'ziga yozishi mumkin
-        if request.user.role == User.ROLE_CHILD and request.user.phone != phone:
-            return Response(
-                {"error": "Child faqat o‘zining app usage ma'lumotini yubora oladi"},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
-        # Parent faqat o'ziga biriktirilgan child uchun yubora oladi
-        if request.user.role == User.ROLE_PARENT:
-            allowed = (
-                target_user == request.user or
-                FamilyRelation.objects.filter(parent=request.user, child=target_user).exists()
-            )
-            if not allowed:
-                return Response(
-                    {"error": "Siz bu foydalanuvchi uchun app usage yubora olmaysiz"},
-                    status=status.HTTP_403_FORBIDDEN,
-                )
-
-        app_usage, created = AppUsage.objects.get_or_create(
+        app_usage, created = AppUsage.objects.update_or_create(
             user=target_user,
             app_name=app_name,
-            defaults={"usage_time": incoming_usage_time},
+            defaults={
+                "usage_time": usage_time
+            }
         )
 
-        if not created:
-            app_usage.usage_time += incoming_usage_time
-            app_usage.save(update_fields=["usage_time", "updated_at"])
-
-        return Response(
-            {
-                "created": created,
-                "message": (
-                    "Yangi app usage yaratildi"
-                    if created else
-                    "Mavjud app usage ustiga vaqt qo‘shildi"
-                ),
-                "data": self.get_serializer(app_usage).data,
-            },
-            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
-    )
+        return Response({
+            "created": created,
+            "data": self.get_serializer(app_usage).data
+        })
 
 # =========================
 # FAMILY
