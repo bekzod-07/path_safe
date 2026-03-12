@@ -43,10 +43,10 @@ class UserLocationInline(admin.TabularInline):
 class AppUsageInline(admin.TabularInline):
     model = AppUsage
     extra = 0
-    fields = ("app_name", "usage_time", "created_at")
-    readonly_fields = ("app_name", "usage_time", "created_at")
+    fields = ("app_name", "usage_time", "created_at", "updated_at")
+    readonly_fields = ("app_name", "usage_time", "created_at", "updated_at")
     can_delete = False
-    ordering = ("-created_at",)
+    ordering = ("-updated_at",)
 
 
 # =========================

@@ -205,29 +205,29 @@ class LocationAPIView(generics.ListCreateAPIView):
         return super().get(request, *args, **kwargs)
 
     def get_queryset(self):
-        user = self.request.user
-        phone = self.request.query_params.get("phone")
-        period = self.request.query_params.get("period")
+    user = self.request.user
+    phone = self.request.query_params.get("phone")
+    period = self.request.query_params.get("period")
 
-        if user.role == User.ROLE_PARENT:
-            queryset = UserLocation.objects.filter(
-                user__parent_relation__parent=user
-            ).select_related("user")
-        else:
-            queryset = UserLocation.objects.filter(user=user).select_related("user")
+    if user.role == User.ROLE_PARENT:
+        queryset = AppUsage.objects.filter(
+            user__parent_relation__parent=user
+        ).select_related("user")
+    else:
+        queryset = AppUsage.objects.filter(user=user).select_related("user")
 
-        if phone:
-            queryset = queryset.filter(user__phone=phone)
+    if phone:
+        queryset = queryset.filter(user__phone=phone)
 
-        if period:
-            try:
-                days = int(period)
-                start_date = timezone.now() - timedelta(days=days)
-                queryset = queryset.filter(created_at__gte=start_date)
-            except ValueError:
-                pass
+    if period:
+        try:
+            days = int(period)
+            start_date = timezone.now() - timedelta(days=days)
+            queryset = queryset.filter(updated_at__gte=start_date)
+        except ValueError:
+            pass
 
-        return queryset.order_by("-created_at")
+    return queryset.order_by("-updated_at")
 
     @swagger_auto_schema(
         tags=["location"],
@@ -361,6 +361,9 @@ class AppUsageAPIView(generics.ListCreateAPIView):
         serializer.is_valid(raise_exception=True)
 
         phone = serializer.validated_data["phone"].strip()
+        app_name = serializer.validated_data["app_name"].strip()
+        incoming_usage_time = serializer.validated_data["usage_time"]
+
         target_user = User.objects.filter(phone=phone).first()
 
         if not target_user:
@@ -388,17 +391,28 @@ class AppUsageAPIView(generics.ListCreateAPIView):
                     status=status.HTTP_403_FORBIDDEN,
                 )
 
-        app_usage = AppUsage.objects.create(
+        app_usage, created = AppUsage.objects.get_or_create(
             user=target_user,
-            app_name=serializer.validated_data["app_name"],
-            usage_time=serializer.validated_data["usage_time"],
+            app_name=app_name,
+            defaults={"usage_time": incoming_usage_time},
         )
+
+        if not created:
+            app_usage.usage_time += incoming_usage_time
+            app_usage.save(update_fields=["usage_time", "updated_at"])
 
         return Response(
-            self.get_serializer(app_usage).data,
-            status=status.HTTP_201_CREATED,
-        )
-
+            {
+                "created": created,
+                "message": (
+                    "Yangi app usage yaratildi"
+                    if created else
+                    "Mavjud app usage ustiga vaqt qo‘shildi"
+                ),
+                "data": self.get_serializer(app_usage).data,
+            },
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+    )
 
 # =========================
 # FAMILY

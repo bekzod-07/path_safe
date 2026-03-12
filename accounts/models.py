@@ -114,13 +114,20 @@ class AppUsage(models.Model):
         verbose_name="Foydalanuvchi",
     )
     app_name = models.CharField(max_length=255, verbose_name="Ilova nomi")
-    usage_time = models.IntegerField(verbose_name="Foydalanish vaqti (daqiqa)")
+    usage_time = models.IntegerField(default=0, verbose_name="Foydalanish vaqti (daqiqa)")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Yaratilgan vaqt")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Yangilangan vaqt")
 
     class Meta:
         verbose_name = "Ilova nazorati"
         verbose_name_plural = "Ilova nazoratlari"
-        ordering = ["-created_at"]
+        ordering = ["-updated_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "app_name"],
+                name="unique_user_app_usage"
+            )
+        ]
 
     def __str__(self):
         return f"{self.app_name} - {self.usage_time} min ({self.user.phone})"

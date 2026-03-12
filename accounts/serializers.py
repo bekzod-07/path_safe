@@ -67,6 +67,7 @@ class AppUsageSerializer(serializers.ModelSerializer):
     full_name = serializers.CharField(source="user.full_name", read_only=True)
     user_role = serializers.CharField(source="user.role", read_only=True)
     created_at = serializers.DateTimeField(format="%Y-%m-%d %H:%M:%S", read_only=True)
+    updated_at = serializers.DateTimeField(format="%Y-%m-%d %H:%M:%S", read_only=True)
 
     class Meta:
         model = AppUsage
@@ -79,6 +80,7 @@ class AppUsageSerializer(serializers.ModelSerializer):
             "app_name",
             "usage_time",
             "created_at",
+            "updated_at",
         ]
 
 
