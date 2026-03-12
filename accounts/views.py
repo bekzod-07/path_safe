@@ -227,8 +227,6 @@ class LocationAPIView(generics.ListCreateAPIView):
             except ValueError:
                 pass
 
-    return queryset.order_by("-updated_at")
-
     @swagger_auto_schema(
         tags=["location"],
         operation_summary="Telefon raqami orqali geolokatsiyani saqlash",
