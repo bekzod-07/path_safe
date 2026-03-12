@@ -231,22 +231,62 @@ class LocationAPIView(generics.ListCreateAPIView):
 
     @swagger_auto_schema(
         tags=["location"],
-        operation_summary="Foydalanuvchining geolokatsiyasini saqlash",
+        operation_summary="Telefon raqami orqali geolokatsiyani saqlash",
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
-            required=["lat", "lng"],
+            required=["phone", "lat", "lng"],
             properties={
+                "phone": openapi.Schema(type=openapi.TYPE_STRING, example="+998901112233"),
                 "lat": openapi.Schema(type=openapi.TYPE_NUMBER, example=41.311081),
                 "lng": openapi.Schema(type=openapi.TYPE_NUMBER, example=69.240562),
                 "address": openapi.Schema(type=openapi.TYPE_STRING, example="Toshkent shahri"),
             },
         ),
+        responses={201: LocationSerializer},
     )
     def post(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        serializer.save(user=request.user)
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+        phone = serializer.validated_data["phone"].strip()
+        target_user = User.objects.filter(phone=phone).first()
+
+        if not target_user:
+            return Response(
+                {"error": "Bunday telefon raqamli foydalanuvchi topilmadi"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # Child faqat o'ziga yozishi mumkin
+        if request.user.role == User.ROLE_CHILD and request.user.phone != phone:
+            return Response(
+                {"error": "Child faqat o‘zining lokatsiyasini yubora oladi"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Parent faqat o'ziga biriktirilgan child uchun yubora oladi
+        if request.user.role == User.ROLE_PARENT:
+            allowed = (
+                target_user == request.user or
+                FamilyRelation.objects.filter(parent=request.user, child=target_user).exists()
+            )
+            if not allowed:
+                return Response(
+                    {"error": "Siz bu foydalanuvchi uchun lokatsiya yubora olmaysiz"},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+        location = UserLocation.objects.create(
+            user=target_user,
+            lat=serializer.validated_data["lat"],
+            lng=serializer.validated_data["lng"],
+            address=serializer.validated_data.get("address"),
+        )
+
+        return Response(
+            self.get_serializer(location).data,
+            status=status.HTTP_201_CREATED,
+        )
 
 
 # =========================
@@ -304,21 +344,60 @@ class AppUsageAPIView(generics.ListCreateAPIView):
 
     @swagger_auto_schema(
         tags=["app-usage"],
-        operation_summary="Ilova ishlatilish ma’lumotini saqlash",
+        operation_summary="Telefon raqami orqali app usage saqlash",
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
-            required=["app_name", "usage_time"],
+            required=["phone", "app_name", "usage_time"],
             properties={
+                "phone": openapi.Schema(type=openapi.TYPE_STRING, example="+998901112233"),
                 "app_name": openapi.Schema(type=openapi.TYPE_STRING, example="YouTube"),
                 "usage_time": openapi.Schema(type=openapi.TYPE_INTEGER, example=25),
             },
         ),
+        responses={201: AppUsageSerializer},
     )
     def post(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        serializer.save(user=request.user)
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+        phone = serializer.validated_data["phone"].strip()
+        target_user = User.objects.filter(phone=phone).first()
+
+        if not target_user:
+            return Response(
+                {"error": "Bunday telefon raqamli foydalanuvchi topilmadi"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # Child faqat o'ziga yozishi mumkin
+        if request.user.role == User.ROLE_CHILD and request.user.phone != phone:
+            return Response(
+                {"error": "Child faqat o‘zining app usage ma'lumotini yubora oladi"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Parent faqat o'ziga biriktirilgan child uchun yubora oladi
+        if request.user.role == User.ROLE_PARENT:
+            allowed = (
+                target_user == request.user or
+                FamilyRelation.objects.filter(parent=request.user, child=target_user).exists()
+            )
+            if not allowed:
+                return Response(
+                    {"error": "Siz bu foydalanuvchi uchun app usage yubora olmaysiz"},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+        app_usage = AppUsage.objects.create(
+            user=target_user,
+            app_name=serializer.validated_data["app_name"],
+            usage_time=serializer.validated_data["usage_time"],
+        )
+
+        return Response(
+            self.get_serializer(app_usage).data,
+            status=status.HTTP_201_CREATED,
+        )
 
 
 # =========================

@@ -42,24 +42,44 @@ class LoginSerializer(serializers.Serializer):
 
 
 class LocationSerializer(serializers.ModelSerializer):
-    phone = serializers.CharField(source="user.phone", read_only=True)
+    phone = serializers.CharField(write_only=True, required=True)
     full_name = serializers.CharField(source="user.full_name", read_only=True)
     user_role = serializers.CharField(source="user.role", read_only=True)
     created_at = serializers.DateTimeField(format="%Y-%m-%d %H:%M:%S", read_only=True)
 
     class Meta:
         model = UserLocation
-        fields = ["id", "phone", "full_name", "user_role", "lat", "lng", "address", "created_at"]
+        fields = [
+            "id",
+            "phone",
+            "full_name",
+            "user_role",
+            "lat",
+            "lng",
+            "address",
+            "created_at",
+        ]
 
 
 class AppUsageSerializer(serializers.ModelSerializer):
+    phone = serializers.CharField(write_only=True, required=True)
     user_phone = serializers.CharField(source="user.phone", read_only=True)
     full_name = serializers.CharField(source="user.full_name", read_only=True)
+    user_role = serializers.CharField(source="user.role", read_only=True)
     created_at = serializers.DateTimeField(format="%Y-%m-%d %H:%M:%S", read_only=True)
 
     class Meta:
         model = AppUsage
-        fields = ["id", "user_phone", "full_name", "app_name", "usage_time", "created_at"]
+        fields = [
+            "id",
+            "phone",
+            "user_phone",
+            "full_name",
+            "user_role",
+            "app_name",
+            "usage_time",
+            "created_at",
+        ]
 
 
 class FamilyChildSerializer(serializers.ModelSerializer):
