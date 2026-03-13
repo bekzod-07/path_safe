@@ -1,10 +1,11 @@
 import random
 from datetime import timedelta
 
-from django.utils import timezone
 from django.contrib.auth import authenticate
+from django.db.models import Q
+from django.utils import timezone
 
-from rest_framework import status, generics, permissions
+from rest_framework import generics, permissions, status
 from rest_framework.authtoken.models import Token
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -12,41 +13,59 @@ from rest_framework.views import APIView
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
 
-from .models import User, UserLocation, AppUsage, FamilyRelation
+from .models import (
+    User,
+    UserLocation,
+    AppUsage,
+    FamilyRelation,
+    FamilyLinkRequest,
+)
+
 from .serializers import (
     RegisterSerializer,
     LoginSerializer,
     VerifyOTPSerializer,
     UserSerializer,
+    UserProfileSerializer,
+    UserProfileUpdateSerializer,
     LocationSerializer,
     AppUsageSerializer,
     FamilyChildSerializer,
-    FamilyUpsertSerializer,
+    FamilyRequestSerializer,
+    FamilyVerifySerializer,
+    FamilyUpdateSerializer,
     FamilyDeleteSerializer,
 )
 
 
-# =========================
-# OTP SETTINGS
-# =========================
-
 TEST_OTP_CODE = "123456"
 ALLOW_TEST_OTP_FOR_ALL_USERS = True
+FAMILY_OTP_EXPIRE_MINUTES = 5
 
 
 def generate_otp():
-    """
-    Register paytida userga saqlanadigan OTP.
-    Test rejimda hammasiga 123456 beriladi.
-    """
     if ALLOW_TEST_OTP_FOR_ALL_USERS:
         return TEST_OTP_CODE
     return str(random.randint(100000, 999999))
 
 
-# =========================
-# AUTH: REGISTER
-# =========================
+def normalize_name(value: str) -> str:
+    return " ".join(value.strip().lower().split())
+
+
+def can_access_target_user(actor, target_user):
+    if actor == target_user:
+        return True
+
+    if actor.role == User.ROLE_PARENT:
+        return FamilyRelation.objects.filter(parent=actor, child=target_user).exists()
+
+    return False
+
+
+def send_test_sms(phone: str, code: str, reason: str = "OTP"):
+    print(f"\n[{timezone.now()}] >>> {reason} SMS YUBORILDI {phone}: {code} <<<\n")
+
 
 class RegisterView(generics.CreateAPIView):
     serializer_class = RegisterSerializer
@@ -65,7 +84,7 @@ class RegisterView(generics.CreateAPIView):
         otp_code = generate_otp()
         user = serializer.save(otp_code=otp_code, is_verified=False)
 
-        print(f"\n[{timezone.now()}] >>> SMS YUBORILDI {user.phone}: {otp_code} <<<\n")
+        send_test_sms(user.phone, otp_code, reason="REGISTER OTP")
 
         return Response(
             {
@@ -76,10 +95,6 @@ class RegisterView(generics.CreateAPIView):
             status=status.HTTP_201_CREATED,
         )
 
-
-# =========================
-# AUTH: VERIFY OTP
-# =========================
 
 class VerifyOTPView(APIView):
     permission_classes = [permissions.AllowAny]
@@ -93,8 +108,8 @@ class VerifyOTPView(APIView):
         serializer = VerifyOTPSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        phone = serializer.validated_data["phone"]
-        code = serializer.validated_data["code"]
+        phone = serializer.validated_data["phone"].strip()
+        code = serializer.validated_data["code"].strip()
 
         user = User.objects.filter(phone=phone).first()
         if not user:
@@ -103,7 +118,6 @@ class VerifyOTPView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        # Test rejim: hamma user uchun 123456 qabul qilinadi
         if ALLOW_TEST_OTP_FOR_ALL_USERS and code == TEST_OTP_CODE:
             user.is_verified = True
             user.otp_code = None
@@ -113,7 +127,6 @@ class VerifyOTPView(APIView):
                 status=status.HTTP_200_OK,
             )
 
-        # Oddiy rejim: bazadagi OTP bilan tekshiradi
         if user.otp_code != code:
             return Response(
                 {"error": "Kod noto‘g‘ri"},
@@ -130,10 +143,6 @@ class VerifyOTPView(APIView):
         )
 
 
-# =========================
-# AUTH: LOGIN
-# =========================
-
 class LoginView(generics.GenericAPIView):
     serializer_class = LoginSerializer
     permission_classes = [permissions.AllowAny]
@@ -147,7 +156,7 @@ class LoginView(generics.GenericAPIView):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        phone = serializer.validated_data["phone"]
+        phone = serializer.validated_data["phone"].strip()
         password = serializer.validated_data["password"]
 
         user = authenticate(phone=phone, password=password)
@@ -176,9 +185,78 @@ class LoginView(generics.GenericAPIView):
         )
 
 
-# =========================
-# LOCATION
-# =========================
+class UserProfileAPIView(generics.RetrieveUpdateAPIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_object(self):
+        return self.request.user
+
+    def get_serializer_class(self):
+        if self.request.method in ["PUT", "PATCH"]:
+            return UserProfileUpdateSerializer
+        return UserProfileSerializer
+
+    @swagger_auto_schema(
+        tags=["auth"],
+        operation_summary="Login qilgan foydalanuvchi profilini olish",
+        responses={200: UserProfileSerializer},
+    )
+    def get(self, request, *args, **kwargs):
+        return super().get(request, *args, **kwargs)
+
+    @swagger_auto_schema(
+        tags=["auth"],
+        operation_summary="Profilni qisman yangilash",
+        request_body=UserProfileUpdateSerializer,
+        responses={200: UserProfileSerializer},
+    )
+    def patch(self, request, *args, **kwargs):
+        return self.partial_update(request, *args, **kwargs)
+
+    @swagger_auto_schema(
+        tags=["auth"],
+        operation_summary="Profilni to‘liq yangilash",
+        request_body=UserProfileUpdateSerializer,
+        responses={200: UserProfileSerializer},
+    )
+    def put(self, request, *args, **kwargs):
+        return self.update(request, *args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop("partial", False)
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+
+        old_phone = instance.phone
+        user = serializer.save()
+        phone_changed = old_phone != user.phone
+
+        response_data = {
+            "message": "Profil muvaffaqiyatli yangilandi",
+            "user": UserProfileSerializer(user).data,
+        }
+
+        if phone_changed:
+            otp_code = generate_otp()
+            user.is_verified = False
+            user.otp_code = otp_code
+            user.save(update_fields=["is_verified", "otp_code"])
+
+            Token.objects.filter(user=user).delete()
+            send_test_sms(user.phone, otp_code, reason="PROFILE PHONE CHANGE OTP")
+
+            response_data.update(
+                {
+                    "message": "Telefon raqam o‘zgardi. Qayta OTP tasdiqlash kerak.",
+                    "requires_reverification": True,
+                    "otp_test_code": otp_code if ALLOW_TEST_OTP_FOR_ALL_USERS else None,
+                    "user": UserProfileSerializer(user).data,
+                }
+            )
+
+        return Response(response_data, status=status.HTTP_200_OK)
+
 
 class LocationAPIView(generics.ListCreateAPIView):
     serializer_class = LocationSerializer
@@ -210,11 +288,11 @@ class LocationAPIView(generics.ListCreateAPIView):
         period = self.request.query_params.get("period")
 
         if user.role == User.ROLE_PARENT:
-            queryset = AppUsage.objects.filter(
-                user__parent_relation__parent=user
-            ).select_related("user")
+            queryset = UserLocation.objects.filter(
+                Q(user=user) | Q(user__parent_relation__parent=user)
+            ).select_related("user").distinct()
         else:
-            queryset = AppUsage.objects.filter(user=user).select_related("user")
+            queryset = UserLocation.objects.filter(user=user).select_related("user")
 
         if phone:
             queryset = queryset.filter(user__phone=phone)
@@ -223,9 +301,11 @@ class LocationAPIView(generics.ListCreateAPIView):
             try:
                 days = int(period)
                 start_date = timezone.now() - timedelta(days=days)
-                queryset = queryset.filter(updated_at__gte=start_date)
+                queryset = queryset.filter(created_at__gte=start_date)
             except ValueError:
                 pass
+
+        return queryset.order_by("-created_at")
 
     @swagger_auto_schema(
         tags=["location"],
@@ -255,24 +335,11 @@ class LocationAPIView(generics.ListCreateAPIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        # Child faqat o'ziga yozishi mumkin
-        if request.user.role == User.ROLE_CHILD and request.user.phone != phone:
+        if not can_access_target_user(request.user, target_user):
             return Response(
-                {"error": "Child faqat o‘zining lokatsiyasini yubora oladi"},
+                {"error": "Siz bu foydalanuvchi uchun lokatsiya yubora olmaysiz"},
                 status=status.HTTP_403_FORBIDDEN,
             )
-
-        # Parent faqat o'ziga biriktirilgan child uchun yubora oladi
-        if request.user.role == User.ROLE_PARENT:
-            allowed = (
-                target_user == request.user or
-                FamilyRelation.objects.filter(parent=request.user, child=target_user).exists()
-            )
-            if not allowed:
-                return Response(
-                    {"error": "Siz bu foydalanuvchi uchun lokatsiya yubora olmaysiz"},
-                    status=status.HTTP_403_FORBIDDEN,
-                )
 
         location = UserLocation.objects.create(
             user=target_user,
@@ -286,10 +353,6 @@ class LocationAPIView(generics.ListCreateAPIView):
             status=status.HTTP_201_CREATED,
         )
 
-
-# =========================
-# APP USAGE
-# =========================
 
 class AppUsageAPIView(generics.ListCreateAPIView):
     serializer_class = AppUsageSerializer
@@ -322,8 +385,8 @@ class AppUsageAPIView(generics.ListCreateAPIView):
 
         if user.role == User.ROLE_PARENT:
             queryset = AppUsage.objects.filter(
-                user__parent_relation__parent=user
-            ).select_related("user")
+                Q(user=user) | Q(user__parent_relation__parent=user)
+            ).select_related("user").distinct()
         else:
             queryset = AppUsage.objects.filter(user=user).select_related("user")
 
@@ -363,29 +426,32 @@ class AppUsageAPIView(generics.ListCreateAPIView):
         usage_time = serializer.validated_data["usage_time"]
 
         target_user = User.objects.filter(phone=phone).first()
-
         if not target_user:
             return Response(
                 {"error": "Foydalanuvchi topilmadi"},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
+        if not can_access_target_user(request.user, target_user):
+            return Response(
+                {"error": "Siz bu foydalanuvchi uchun app usage yubora olmaysiz"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         app_usage, created = AppUsage.objects.update_or_create(
             user=target_user,
             app_name=app_name,
-            defaults={
-                "usage_time": usage_time
-            }
+            defaults={"usage_time": usage_time},
         )
 
-        return Response({
-            "created": created,
-            "data": self.get_serializer(app_usage).data
-        })
+        return Response(
+            {
+                "created": created,
+                "data": self.get_serializer(app_usage).data,
+            },
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
 
-# =========================
-# FAMILY
-# =========================
 
 class FamilyManagementView(APIView):
     permission_classes = [permissions.IsAuthenticated]
@@ -427,45 +493,117 @@ class FamilyManagementView(APIView):
 
     @swagger_auto_schema(
         tags=["family"],
-        operation_summary="Farzandni ota-onaga biriktirish yoki labelni yangilash",
-        request_body=FamilyUpsertSerializer,
+        operation_summary="Farzandni biriktirish uchun OTP yuborish",
+        request_body=FamilyRequestSerializer,
     )
     def post(self, request):
         blocked = self._ensure_parent(request)
         if blocked:
             return blocked
 
-        serializer = FamilyUpsertSerializer(data=request.data)
+        serializer = FamilyRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
         child_phone = serializer.validated_data["child_phone"]
+        child_name = serializer.validated_data["child_name"]
         child_label = serializer.validated_data["child_label"]
 
         child = User.objects.filter(phone=child_phone, role=User.ROLE_CHILD).first()
         if not child:
             return Response(
-                {"error": "Bunday raqamli farzand topilmadi"},
+                {"error": "Bunday telefon raqamli child topilmadi"},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        relation, created = FamilyRelation.objects.update_or_create(
+        if not child.is_verified:
+            return Response(
+                {"error": "Bu child akkaunt hali tasdiqlanmagan"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if normalize_name(child.full_name) != normalize_name(child_name):
+            return Response(
+                {"error": "Farzand ismi mos kelmadi"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if FamilyRelation.objects.filter(parent=request.user, child=child).exists():
+            return Response(
+                {"error": "Bu farzand allaqachon biriktirilgan"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        otp_code = generate_otp()
+        expires_at = timezone.now() + timedelta(minutes=FAMILY_OTP_EXPIRE_MINUTES)
+
+        FamilyLinkRequest.objects.filter(
             parent=request.user,
             child=child,
-            defaults={"child_label": child_label},
+            is_used=False,
+        ).update(is_used=True)
+
+        FamilyLinkRequest.objects.create(
+            parent=request.user,
+            child=child,
+            child_label=child_label,
+            otp_code=otp_code,
+            expires_at=expires_at,
+            is_used=False,
         )
+
+        send_test_sms(child.phone, otp_code, reason="FAMILY LINK OTP")
 
         return Response(
             {
                 "status": "success",
-                "created": created,
-                "message": (
-                    f"{child.full_name} muvaffaqiyatli biriktirildi"
-                    if created
-                    else f"{child.full_name} uchun label yangilandi"
-                ),
+                "message": "Tasdiqlash kodi yuborildi. Endi /family/verify/ orqali kodni tasdiqlang.",
+                "child_phone": child.phone,
+                "child_name": child.full_name,
+                "otp_test_code": otp_code if ALLOW_TEST_OTP_FOR_ALL_USERS else None,
+                "expires_in_minutes": FAMILY_OTP_EXPIRE_MINUTES,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @swagger_auto_schema(
+        tags=["family"],
+        operation_summary="Biriktirilgan farzand labelini tahrirlash",
+        request_body=FamilyUpdateSerializer,
+        responses={200: FamilyChildSerializer},
+    )
+    def patch(self, request):
+        blocked = self._ensure_parent(request)
+        if blocked:
+            return blocked
+
+        serializer = FamilyUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        child_phone = serializer.validated_data["child_phone"]
+        child_label = serializer.validated_data["child_label"]
+
+        relation = FamilyRelation.objects.filter(
+            parent=request.user,
+            child__phone=child_phone,
+        ).select_related("child").first()
+
+        if not relation:
+            return Response(
+                {"error": "Tahrirlash uchun bunday family bog‘lanish topilmadi"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        relation.child_label = child_label
+        relation.save(update_fields=["child_label"])
+
+        return Response(
+            {
+                "status": "success",
+                "updated": True,
+                "message": f"{relation.child.full_name} uchun label yangilandi",
                 "child": FamilyChildSerializer(relation).data,
             },
-            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+            status=status.HTTP_200_OK,
         )
 
     @swagger_auto_schema(
@@ -496,7 +634,6 @@ class FamilyManagementView(APIView):
             return blocked
 
         child_phone = request.query_params.get("child_phone") or request.data.get("child_phone")
-
         serializer = FamilyDeleteSerializer(data={"child_phone": child_phone})
         serializer.is_valid(raise_exception=True)
 
@@ -512,7 +649,96 @@ class FamilyManagementView(APIView):
             )
 
         relation.delete()
+
         return Response(
             {"message": "Farzand muvaffaqiyatli olib tashlandi"},
             status=status.HTTP_200_OK,
+        )
+
+
+class FamilyVerifyView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def _ensure_parent(self, request):
+        if request.user.role != User.ROLE_PARENT:
+            return Response(
+                {"error": "Faqat ota-onalar family verify endpointdan foydalana oladi"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return None
+
+    @swagger_auto_schema(
+        tags=["family"],
+        operation_summary="Family biriktirish uchun OTP kodni tasdiqlash",
+        request_body=FamilyVerifySerializer,
+    )
+    def post(self, request):
+        blocked = self._ensure_parent(request)
+        if blocked:
+            return blocked
+
+        serializer = FamilyVerifySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        child_phone = serializer.validated_data["child_phone"]
+        code = serializer.validated_data["code"].strip()
+
+        child = User.objects.filter(phone=child_phone, role=User.ROLE_CHILD).first()
+        if not child:
+            return Response(
+                {"error": "Bunday child topilmadi"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        link_request = FamilyLinkRequest.objects.filter(
+            parent=request.user,
+            child=child,
+            is_used=False,
+        ).order_by("-created_at").first()
+
+        if not link_request:
+            return Response(
+                {"error": "Tasdiqlash uchun faol so‘rov topilmadi"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if link_request.expires_at < timezone.now():
+            return Response(
+                {"error": "Kodning amal qilish muddati tugagan"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        is_test_code_valid = ALLOW_TEST_OTP_FOR_ALL_USERS and code == TEST_OTP_CODE
+        is_real_code_valid = link_request.otp_code == code
+
+        if not is_test_code_valid and not is_real_code_valid:
+            return Response(
+                {"error": "Kod noto‘g‘ri"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if FamilyRelation.objects.filter(parent=request.user, child=child).exists():
+            link_request.is_used = True
+            link_request.save(update_fields=["is_used"])
+            return Response(
+                {"error": "Bu farzand allaqachon biriktirilgan"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        relation = FamilyRelation.objects.create(
+            parent=request.user,
+            child=child,
+            child_label=link_request.child_label,
+        )
+
+        link_request.is_used = True
+        link_request.save(update_fields=["is_used"])
+
+        return Response(
+            {
+                "status": "success",
+                "message": f"{child.full_name} muvaffaqiyatli biriktirildi",
+                "child": FamilyChildSerializer(relation).data,
+            },
+            status=status.HTTP_201_CREATED,
         )

@@ -9,7 +9,7 @@ SECRET_KEY = 'django-insecure-n@a&7s9wgq%a6r%tjeh@jbj-i#nbkvwk@huv9j*uus0!7&968b
 DEBUG = True
 
 # Domenlar
-ALLOWED_HOSTS = ['api.kyotosushi.uz', 'www.api.kyotosushi.uz']
+ALLOWED_HOSTS = ['api.kyotosushi.uz', 'www.api.kyotosushi.uz', '127.0.0.1']
 
 # --- HTTPS VA XAVFSIZLIK SOZLAMALARI ---
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')

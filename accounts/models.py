@@ -85,6 +85,35 @@ class FamilyRelation(models.Model):
         return f"{self.parent.full_name} -> {self.child.full_name}"
 
 
+class FamilyLinkRequest(models.Model):
+    parent = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="family_link_requests",
+    )
+    child = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="incoming_family_link_requests",
+    )
+    child_label = models.CharField(max_length=100)
+    otp_code = models.CharField(max_length=6)
+    is_used = models.BooleanField(default=False)
+    expires_at = models.DateTimeField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["parent", "child", "is_used"]),
+            models.Index(fields=["expires_at"]),
+        ]
+
+    def __str__(self):
+        return f"OTP so‘rov: {self.parent.phone} -> {self.child.phone}"
+
+
 class UserLocation(models.Model):
     user = models.ForeignKey(
         User,
