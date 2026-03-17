@@ -164,7 +164,6 @@ class LoginView(generics.GenericAPIView):
             return Response(
                 {
                     "error": "Telefon yoki parol xato",
-                    "verification_status": "tasdiqlanmagan"
                 },
                 status=status.HTTP_401_UNAUTHORIZED,
             )
@@ -172,7 +171,6 @@ class LoginView(generics.GenericAPIView):
         if not user.is_verified:
             return Response(
                 {
-                    "error": "Telefon raqam hali tasdiqlanmagan",
                     "verification_status": "tasdiqlanmagan"
                 },
                 status=status.HTTP_403_FORBIDDEN,
