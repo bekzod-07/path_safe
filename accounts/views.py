@@ -162,13 +162,19 @@ class LoginView(generics.GenericAPIView):
         user = authenticate(phone=phone, password=password)
         if not user:
             return Response(
-                {"error": "Telefon yoki parol xato"},
+                {
+                    "error": "Telefon yoki parol xato",
+                    "verification_status": "tasdiqlanmagan"
+                },
                 status=status.HTTP_401_UNAUTHORIZED,
             )
 
         if not user.is_verified:
             return Response(
-                {"error": "Telefon raqam hali tasdiqlanmagan"},
+                {
+                    "error": "Telefon raqam hali tasdiqlanmagan",
+                    "verification_status": "tasdiqlanmagan"
+                },
                 status=status.HTTP_403_FORBIDDEN,
             )
 
@@ -180,10 +186,11 @@ class LoginView(generics.GenericAPIView):
                 "full_name": user.full_name,
                 "phone": user.phone,
                 "role": user.role,
+                "is_verified": user.is_verified,
+                "verification_status": "tasdiqlangan" if user.is_verified else "tasdiqlanmagan",
             },
             status=status.HTTP_200_OK,
         )
-
 
 class UserProfileAPIView(generics.RetrieveUpdateAPIView):
     permission_classes = [permissions.IsAuthenticated]
