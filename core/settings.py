@@ -125,7 +125,7 @@ SWAGGER_SETTINGS = {
             'type': 'apiKey',
             'name': 'Authorization',
             'in': 'header',
-            'description': 'Token-based auth. Example: Token 123abc...',
+            'description': 'Format: Token <your_token>',
         }
     }
 }
