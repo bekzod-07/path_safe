@@ -55,7 +55,7 @@ INSTALLED_APPS = [
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
-        'rest_framework.authentication.TokenAuthentication',
+        'accounts.authentication.SwaggerTokenAuthentication',
     ],
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.AllowAny',
@@ -120,12 +120,14 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 LOGIN_URL = 'login'
 
 SWAGGER_SETTINGS = {
+    'USE_SESSION_AUTH': False,
     'SECURITY_DEFINITIONS': {
         'Token': {
             'type': 'apiKey',
             'name': 'Authorization',
             'in': 'header',
-            'description': 'Format: Token <your_token>',
+            'description': 'Token kiriting. Ishlaydigan formatlar: <token>, Token <token>, Bearer <token>',
         }
-    }
+    },
+    'SECURITY_REQUIREMENTS': [{'Token': []}],
 }
