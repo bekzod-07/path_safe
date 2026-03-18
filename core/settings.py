@@ -126,8 +126,10 @@ SWAGGER_SETTINGS = {
             'type': 'apiKey',
             'name': 'Authorization',
             'in': 'header',
-            'description': 'Token kiriting. Ishlaydigan formatlar: <token>, Token <token>, Bearer <token>',
+            'description': 'Ishlaydigan formatlar: <token> yoki Token <token> yoki Bearer <token>',
         }
     },
-    'SECURITY_REQUIREMENTS': [{'Token': []}],
+    'SECURITY_REQUIREMENTS': [
+        {'Token': []}
+    ],
 }

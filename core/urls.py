@@ -42,7 +42,7 @@ urlpatterns = [
     path("app-usage/", AppUsageAPIView.as_view(), name="app_usage"),
 
     path("family/", FamilyManagementView.as_view(), name="family_management"),
-    path("family/verify/", FamilyVerifyView.as_view(), name="family_verify"),  # <-- shu qo‘shiladi
+    path("family/verify/", FamilyVerifyView.as_view(), name="family_verify"),
 
     path("swagger/", schema_view.with_ui("swagger", cache_timeout=0), name="schema-swagger-ui"),
 ]
