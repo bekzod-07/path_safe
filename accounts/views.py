@@ -36,7 +36,7 @@ from .serializers import (
     FamilyUpdateSerializer,
     FamilyDeleteSerializer,
 )
-
+from rest_framework.authentication import TokenAuthentication
 
 TEST_OTP_CODE = "123456"
 ALLOW_TEST_OTP_FOR_ALL_USERS = True
@@ -498,6 +498,7 @@ def generate_family_otp():
 
 
 class FamilyManagementView(APIView):
+    authentication_classes = [TokenAuthentication]
     permission_classes = [permissions.IsAuthenticated]
 
     def _ensure_parent(self, request):
@@ -699,6 +700,7 @@ class FamilyManagementView(APIView):
 
 
 class FamilyVerifyView(APIView):
+    authentication_classes = [TokenAuthentication]
     permission_classes = [permissions.IsAuthenticated]
 
     def _ensure_parent(self, request):
