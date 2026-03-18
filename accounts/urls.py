@@ -10,6 +10,7 @@ from .views import (
     LocationAPIView,
     AppUsageAPIView,
     FamilyManagementView,
+    FamilyVerifyView,
 )
 
 urlpatterns = [
@@ -21,4 +22,6 @@ urlpatterns = [
     path("location/", LocationAPIView.as_view(), name="location"),
     path("app-usage/", AppUsageAPIView.as_view(), name="app_usage"),
     path("family/", FamilyManagementView.as_view(), name="family_management"),
+    path("family/verify/", FamilyVerifyView.as_view(), name="family-verify"),
+
 ]
