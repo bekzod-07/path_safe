@@ -195,15 +195,66 @@ class FamilyChildSerializer(serializers.ModelSerializer):
     phone = serializers.CharField(source="child.phone", read_only=True)
     is_verified = serializers.BooleanField(source="child.is_verified", read_only=True)
     label = serializers.CharField(source="child_label", read_only=True)
+    status = serializers.SerializerMethodField()
     linked_at = serializers.DateTimeField(
         source="created_at",
         format="%Y-%m-%d %H:%M:%S",
-        read_only=True
+        read_only=True,
     )
+    request_expires_at = serializers.SerializerMethodField()
 
     class Meta:
         model = FamilyRelation
-        fields = ["child_id", "full_name", "phone", "is_verified", "label", "linked_at"]
+        fields = [
+            "child_id",
+            "full_name",
+            "phone",
+            "is_verified",
+            "label",
+            "status",
+            "linked_at",
+            "request_expires_at",
+        ]
+
+    def get_status(self, obj):
+        return "tasdiqlangan"
+
+    def get_request_expires_at(self, obj):
+        return None
+
+
+class FamilyPendingSerializer(serializers.ModelSerializer):
+    child_id = serializers.IntegerField(source="child.id", read_only=True)
+    full_name = serializers.CharField(source="child.full_name", read_only=True)
+    phone = serializers.CharField(source="child.phone", read_only=True)
+    is_verified = serializers.BooleanField(source="child.is_verified", read_only=True)
+    label = serializers.CharField(source="child_label", read_only=True)
+    status = serializers.SerializerMethodField()
+    linked_at = serializers.SerializerMethodField()
+    request_expires_at = serializers.DateTimeField(
+        source="expires_at",
+        format="%Y-%m-%d %H:%M:%S",
+        read_only=True,
+    )
+
+    class Meta:
+        model = FamilyLinkRequest
+        fields = [
+            "child_id",
+            "full_name",
+            "phone",
+            "is_verified",
+            "label",
+            "status",
+            "linked_at",
+            "request_expires_at",
+        ]
+
+    def get_status(self, obj):
+        return "tasdiqlanmagan"
+
+    def get_linked_at(self, obj):
+        return None
 
 
 class FamilyRequestSerializer(serializers.Serializer):

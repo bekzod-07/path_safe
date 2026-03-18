@@ -35,8 +35,9 @@ from .serializers import (
     FamilyVerifySerializer,
     FamilyUpdateSerializer,
     FamilyDeleteSerializer,
+    FamilyPendingSerializer,
 )
-from .authentication import SwaggerTokenAuthentication
+from rest_framework.authentication import TokenAuthentication
 
 TEST_OTP_CODE = "123456"
 ALLOW_TEST_OTP_FOR_ALL_USERS = True
@@ -498,7 +499,7 @@ def generate_family_otp():
 
 
 class FamilyManagementView(APIView):
-    authentication_classes = [SwaggerTokenAuthentication]
+    authentication_classes = [TokenAuthentication]
     permission_classes = [permissions.IsAuthenticated]
 
     def _ensure_parent(self, request):
@@ -511,7 +512,7 @@ class FamilyManagementView(APIView):
 
     @swagger_auto_schema(
         tags=["family"],
-        operation_summary="Ota-onaga biriktirilgan farzandlar ro'yxati",
+        operation_summary="Ota-onaga biriktirilgan va kutilayotgan family holatlari",
         manual_parameters=[
             openapi.Parameter(
                 "child_phone",
@@ -520,7 +521,6 @@ class FamilyManagementView(APIView):
                 description="Muayyan farzandni raqami bo'yicha qidirish",
             )
         ],
-        responses={200: FamilyChildSerializer(many=True)},
     )
     def get(self, request):
         blocked = self._ensure_parent(request)
@@ -528,15 +528,28 @@ class FamilyManagementView(APIView):
             return blocked
 
         child_phone = request.query_params.get("child_phone")
-        relations = FamilyRelation.objects.filter(
-            parent=request.user
+
+        relations = FamilyRelation.objects.filter(parent=request.user).select_related("child")
+        pending_requests = FamilyLinkRequest.objects.filter(
+            parent=request.user,
+            is_used=False,
+            expires_at__gte=timezone.now(),
         ).select_related("child")
 
         if child_phone:
             relations = relations.filter(child__phone=child_phone)
+            pending_requests = pending_requests.filter(child__phone=child_phone)
 
-        serializer = FamilyChildSerializer(relations, many=True)
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        return Response(
+            {
+                "status": "success",
+                "confirmed_count": relations.count(),
+                "pending_count": pending_requests.count(),
+                "confirmed_children": FamilyChildSerializer(relations, many=True).data,
+                "pending_children": FamilyPendingSerializer(pending_requests, many=True).data,
+            },
+            status=status.HTTP_200_OK,
+        )
 
     @swagger_auto_schema(
         tags=["family"],
@@ -607,11 +620,13 @@ class FamilyManagementView(APIView):
         return Response(
             {
                 "status": "success",
-                "message": "Tasdiqlash kodi yuborildi",
+                "verification_status": "tasdiqlanmagan",
+                "message": "Tasdiqlash kodi yuborildi. Endi /family/verify/ orqali tasdiqlang.",
                 "child_phone": child.phone,
                 "child_name": child.full_name,
                 "otp_test_code": otp_code if ALLOW_TEST_OTP_FOR_ALL_USERS else None,
                 "expires_in_minutes": FAMILY_OTP_EXPIRE_MINUTES,
+                "verify_endpoint": "/family/verify/",
             },
             status=status.HTTP_200_OK,
         )
@@ -686,21 +701,35 @@ class FamilyManagementView(APIView):
             child__phone=child_phone,
         ).first()
 
-        if not relation:
+        if relation:
+            relation.delete()
             return Response(
-                {"error": "Bunday birikma topilmadi"},
-                status=status.HTTP_404_NOT_FOUND,
+                {"message": "Farzand muvaffaqiyatli olib tashlandi"},
+                status=status.HTTP_200_OK,
             )
 
-        relation.delete()
+        pending_request = FamilyLinkRequest.objects.filter(
+            parent=request.user,
+            child__phone=child_phone,
+            is_used=False,
+        ).order_by("-created_at").first()
+
+        if pending_request:
+            pending_request.is_used = True
+            pending_request.save(update_fields=["is_used"])
+            return Response(
+                {"message": "Tasdiqlanmagan family so'rovi bekor qilindi"},
+                status=status.HTTP_200_OK,
+            )
+
         return Response(
-            {"message": "Farzand muvaffaqiyatli olib tashlandi"},
-            status=status.HTTP_200_OK,
+            {"error": "Bunday birikma yoki kutilayotgan so'rov topilmadi"},
+            status=status.HTTP_404_NOT_FOUND,
         )
 
 
 class FamilyVerifyView(APIView):
-    authentication_classes = [SwaggerTokenAuthentication]
+    authentication_classes = [TokenAuthentication]
     permission_classes = [permissions.IsAuthenticated]
 
     def _ensure_parent(self, request):
@@ -788,13 +817,9 @@ class FamilyVerifyView(APIView):
         return Response(
             {
                 "status": "success",
+                "verification_status": "tasdiqlangan",
                 "message": f"{child.full_name} muvaffaqiyatli biriktirildi",
-                "data": {
-                    "id": relation.id,
-                    "child_name": child.full_name,
-                    "child_phone": child.phone,
-                    "label": relation.child_label,
-                },
+                "data": FamilyChildSerializer(relation).data,
             },
             status=status.HTTP_201_CREATED,
         )
