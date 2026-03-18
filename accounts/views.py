@@ -462,22 +462,23 @@ class FamilyManagementView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def _ensure_parent(self, request):
+        """Faqat ota-ona ekanligini tekshirish uchun yordamchi metod"""
         if request.user.role != User.ROLE_PARENT:
             return Response(
-                {"error": "Faqat ota-onalar family endpointdan foydalana oladi"},
+                {"error": "Faqat ota-onalar family bo'limidan foydalana oladi"},
                 status=status.HTTP_403_FORBIDDEN,
             )
         return None
 
     @swagger_auto_schema(
         tags=["family"],
-        operation_summary="Login qilgan ota-onaga biriktirilgan farzandlar ro‘yxati",
+        operation_summary="Ota-onaga biriktirilgan farzandlar ro'yxati",
         manual_parameters=[
             openapi.Parameter(
                 "child_phone",
                 openapi.IN_QUERY,
                 type=openapi.TYPE_STRING,
-                description="Muayyan farzandni raqami bo‘yicha qidirish",
+                description="Muayyan farzandni raqami bo'yicha qidirish",
             )
         ],
         responses={200: FamilyChildSerializer(many=True)},
@@ -498,7 +499,7 @@ class FamilyManagementView(APIView):
 
     @swagger_auto_schema(
         tags=["family"],
-        operation_summary="Farzandni biriktirish uchun OTP yuborish",
+        operation_summary="Farzandni biriktirish (Test rejimi: kod 123456)",
         request_body=FamilyRequestSerializer,
     )
     def post(self, request):
@@ -513,40 +514,46 @@ class FamilyManagementView(APIView):
         child_name = serializer.validated_data["child_name"]
         child_label = serializer.validated_data["child_label"]
 
+        # Farzandni qidirish
         child = User.objects.filter(phone=child_phone, role=User.ROLE_CHILD).first()
         if not child:
             return Response(
-                {"error": "Bunday telefon raqamli child topilmadi"},
+                {"error": "Bunday telefon raqamli farzand topilmadi"},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
         if not child.is_verified:
             return Response(
-                {"error": "Bu child akkaunt hali tasdiqlanmagan"},
+                {"error": "Bu farzand akkaunti hali tasdiqlanmagan"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # Ismni tekshirish
         if normalize_name(child.full_name) != normalize_name(child_name):
             return Response(
-                {"error": "Farzand ismi mos kelmadi"},
+                {"error": "Farzand ismi bazadagi ma'lumotga mos kelmadi"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # Allaqachon ulanganmi?
         if FamilyRelation.objects.filter(parent=request.user, child=child).exists():
             return Response(
                 {"error": "Bu farzand allaqachon biriktirilgan"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        otp_code = generate_otp()
-        expires_at = timezone.now() + timedelta(minutes=FAMILY_OTP_EXPIRE_MINUTES)
+        # --- TEST REJIMI: OTP DOIM 123456 ---
+        otp_code = "123456"
+        expires_at = timezone.now() + timedelta(minutes=10) # 10 minut amal qiladi
 
+        # Eski so'rovlarni o'chirish/ishlatilgan qilish
         FamilyLinkRequest.objects.filter(
             parent=request.user,
             child=child,
             is_used=False,
         ).update(is_used=True)
 
+        # Yangi ulanish so'rovini saqlash
         FamilyLinkRequest.objects.create(
             parent=request.user,
             child=child,
@@ -556,23 +563,21 @@ class FamilyManagementView(APIView):
             is_used=False,
         )
 
-        send_test_sms(child.phone, otp_code, reason="FAMILY LINK OTP")
-
+        # SMS yuborish o'rniga shunchaki response qaytaramiz
         return Response(
             {
                 "status": "success",
-                "message": "Tasdiqlash kodi yuborildi. Endi /family/verify/ orqali kodni tasdiqlang.",
+                "message": "Tasdiqlash kodi tayyorlandi. Test kodi: 123456",
                 "child_phone": child.phone,
                 "child_name": child.full_name,
-                "otp_test_code": otp_code if ALLOW_TEST_OTP_FOR_ALL_USERS else None,
-                "expires_in_minutes": FAMILY_OTP_EXPIRE_MINUTES,
+                "otp_test_code": "123456"
             },
             status=status.HTTP_200_OK,
         )
 
     @swagger_auto_schema(
         tags=["family"],
-        operation_summary="Biriktirilgan farzand labelini tahrirlash",
+        operation_summary="Farzand nomini (label) o'zgartirish",
         request_body=FamilyUpdateSerializer,
         responses={200: FamilyChildSerializer},
     )
@@ -594,7 +599,7 @@ class FamilyManagementView(APIView):
 
         if not relation:
             return Response(
-                {"error": "Tahrirlash uchun bunday family bog‘lanish topilmadi"},
+                {"error": "Tahrirlash uchun bunday ulanish topilmadi"},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
@@ -604,8 +609,7 @@ class FamilyManagementView(APIView):
         return Response(
             {
                 "status": "success",
-                "updated": True,
-                "message": f"{relation.child.full_name} uchun label yangilandi",
+                "message": "Label yangilandi",
                 "child": FamilyChildSerializer(relation).data,
             },
             status=status.HTTP_200_OK,
@@ -613,25 +617,15 @@ class FamilyManagementView(APIView):
 
     @swagger_auto_schema(
         tags=["family"],
-        operation_summary="Farzandni ota-onadan uzish",
+        operation_summary="Farzandni ro'yxatdan o'chirish",
         manual_parameters=[
             openapi.Parameter(
                 "child_phone",
                 openapi.IN_QUERY,
                 type=openapi.TYPE_STRING,
-                required=False,
-                description="Farzand telefon raqami",
+                description="O'chiriladigan farzand raqami",
             )
         ],
-        request_body=openapi.Schema(
-            type=openapi.TYPE_OBJECT,
-            properties={
-                "child_phone": openapi.Schema(
-                    type=openapi.TYPE_STRING,
-                    example="+998901112233",
-                ),
-            },
-        ),
     )
     def delete(self, request):
         blocked = self._ensure_parent(request)
@@ -639,12 +633,13 @@ class FamilyManagementView(APIView):
             return blocked
 
         child_phone = request.query_params.get("child_phone") or request.data.get("child_phone")
-        serializer = FamilyDeleteSerializer(data={"child_phone": child_phone})
-        serializer.is_valid(raise_exception=True)
+        
+        if not child_phone:
+            return Response({"error": "child_phone yuborilishi shart"}, status=status.HTTP_400_BAD_REQUEST)
 
         relation = FamilyRelation.objects.filter(
             parent=request.user,
-            child__phone=serializer.validated_data["child_phone"],
+            child__phone=child_phone,
         ).first()
 
         if not relation:
@@ -654,13 +649,8 @@ class FamilyManagementView(APIView):
             )
 
         relation.delete()
-
-        return Response(
-            {"message": "Farzand muvaffaqiyatli olib tashlandi"},
-            status=status.HTTP_200_OK,
-        )
-
-
+        return Response({"message": "Farzand muvaffaqiyatli olib tashlandi"}, status=status.HTTP_200_OK)
+    
 class FamilyVerifyView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
